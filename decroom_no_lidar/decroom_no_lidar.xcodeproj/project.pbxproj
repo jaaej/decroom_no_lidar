@@ -1,0 +1,742 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C201B101EAF54A0E000011 /* decroom_no_lidar/ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A101EAF54A0E000001 /* decroom_no_lidar/ContentView.swift */; };
+		C201B102EAF54A0E000012 /* decroom_no_lidar/decroom_no_lidarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A102EAF54A0E000002 /* decroom_no_lidar/decroom_no_lidarApp.swift */; };
+		C201B103EAF54A0E000013 /* decroom_no_lidar/VideoRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A103EAF54A0E000003 /* decroom_no_lidar/VideoRecorderView.swift */; };
+		C201B104EAF54A0E000014 /* decroom_no_lidar/RecordingProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A104EAF54A0E000004 /* decroom_no_lidar/RecordingProcessor.swift */; };
+		C201B105EAF54A0E000015 /* decroom_no_lidar/RoomModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A105EAF54A0E000005 /* decroom_no_lidar/RoomModels.swift */; };
+		C201B106EAF54A0E000016 /* decroom_no_lidar/RoomSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A106EAF54A0E000006 /* decroom_no_lidar/RoomSceneView.swift */; };
+		C201B107EAF54A0E000017 /* decroom_no_lidar/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C201A107EAF54A0E000007 /* decroom_no_lidar/Assets.xcassets */; };
+		C201B108EAF54A0E000018 /* decroom_no_lidar/UploadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A108EAF54A0E000008 /* decroom_no_lidar/UploadService.swift */; };
+		C201B109EAF54A0E000019 /* decroom_no_lidar/RoomStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A109EAF54A0E000009 /* decroom_no_lidar/RoomStore.swift */; };
+		C201B10AEAF54A0E00001A /* decroom_no_lidar/MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A10AEAF54A0E00000A /* decroom_no_lidar/MainTabView.swift */; };
+		C201B10BEAF54A0E00001B /* decroom_no_lidar/HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A10BEAF54A0E00000B /* decroom_no_lidar/HomeView.swift */; };
+		C201B10CEAF54A0E00001C /* decroom_no_lidar/RoomCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A10CEAF54A0E00000C /* decroom_no_lidar/RoomCardView.swift */; };
+		C201B10DEAF54A0E00001D /* decroom_no_lidar/CaptureFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A10DEAF54A0E00000D /* decroom_no_lidar/CaptureFlowView.swift */; };
+		C201B10EEAF54A0E00001E /* decroom_no_lidar/CoverageEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A10EEAF54A0E00000E /* decroom_no_lidar/CoverageEngine.swift */; };
+		C201B111EAF54A0E000021 /* decroom_no_lidar/ScanGuidanceOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A111EAF54A0E000011 /* decroom_no_lidar/ScanGuidanceOverlayView.swift */; };
+		C201B112EAF54A0E000022 /* decroom_no_lidar/ServerDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A112EAF54A0E000012 /* decroom_no_lidar/ServerDiscovery.swift */; };
+		C201B113EAF54A0E000023 /* decroom_no_lidar/FurnitureScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C201A113EAF54A0E000013 /* decroom_no_lidar/FurnitureScanView.swift */; };
+		C301B201EAF54A0E000031 /* decroom_no_lidar/kenney_bed.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A201EAF54A0E000021 /* decroom_no_lidar/kenney_bed.usdz */; };
+		C301B202EAF54A0E000032 /* decroom_no_lidar/kenney_bookshelf.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A202EAF54A0E000022 /* decroom_no_lidar/kenney_bookshelf.usdz */; };
+		C301B203EAF54A0E000033 /* decroom_no_lidar/kenney_chair.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A203EAF54A0E000023 /* decroom_no_lidar/kenney_chair.usdz */; };
+		C301B204EAF54A0E000034 /* decroom_no_lidar/kenney_desk.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A204EAF54A0E000024 /* decroom_no_lidar/kenney_desk.usdz */; };
+		C301B205EAF54A0E000035 /* decroom_no_lidar/kenney_dresser.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A205EAF54A0E000025 /* decroom_no_lidar/kenney_dresser.usdz */; };
+		C301B206EAF54A0E000036 /* decroom_no_lidar/kenney_lamp_desk.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A206EAF54A0E000026 /* decroom_no_lidar/kenney_lamp_desk.usdz */; };
+		C301B207EAF54A0E000037 /* decroom_no_lidar/kenney_lamp_floor.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A207EAF54A0E000027 /* decroom_no_lidar/kenney_lamp_floor.usdz */; };
+		C301B208EAF54A0E000038 /* decroom_no_lidar/kenney_monitor.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A208EAF54A0E000028 /* decroom_no_lidar/kenney_monitor.usdz */; };
+		C301B209EAF54A0E000039 /* decroom_no_lidar/kenney_nightstand.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A209EAF54A0E000029 /* decroom_no_lidar/kenney_nightstand.usdz */; };
+		C301B20AEAF54A0E00003A /* decroom_no_lidar/kenney_plant.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A20AEAF54A0E00002A /* decroom_no_lidar/kenney_plant.usdz */; };
+		C301B20BEAF54A0E00003B /* decroom_no_lidar/kenney_rug.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A20BEAF54A0E00002B /* decroom_no_lidar/kenney_rug.usdz */; };
+		C301B20CEAF54A0E00003C /* decroom_no_lidar/kenney_sofa.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A20CEAF54A0E00002C /* decroom_no_lidar/kenney_sofa.usdz */; };
+		C301B20DEAF54A0E00003D /* decroom_no_lidar/kenney_table.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C301A20DEAF54A0E00002D /* decroom_no_lidar/kenney_table.usdz */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		821EA1372EDAC64700829599 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 821EA11E2EDAC64500829599 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 821EA1252EDAC64500829599;
+			remoteInfo = decroom_no_lidar;
+		};
+		821EA1412EDAC64700829599 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 821EA11E2EDAC64500829599 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 821EA1252EDAC64500829599;
+			remoteInfo = decroom_no_lidar;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		821EA1262EDAC64500829599 /* decroom_no_lidar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = decroom_no_lidar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		821EA1362EDAC64700829599 /* decroom_no_lidarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = decroom_no_lidarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		821EA1402EDAC64700829599 /* decroom_no_lidarUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = decroom_no_lidarUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C201A101EAF54A0E000001 /* decroom_no_lidar/ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/ContentView.swift; sourceTree = "<group>"; };
+		C201A102EAF54A0E000002 /* decroom_no_lidar/decroom_no_lidarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/decroom_no_lidarApp.swift; sourceTree = "<group>"; };
+		C201A103EAF54A0E000003 /* decroom_no_lidar/VideoRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/VideoRecorderView.swift; sourceTree = "<group>"; };
+		C201A104EAF54A0E000004 /* decroom_no_lidar/RecordingProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/RecordingProcessor.swift; sourceTree = "<group>"; };
+		C201A105EAF54A0E000005 /* decroom_no_lidar/RoomModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/RoomModels.swift; sourceTree = "<group>"; };
+		C201A106EAF54A0E000006 /* decroom_no_lidar/RoomSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/RoomSceneView.swift; sourceTree = "<group>"; };
+		C201A107EAF54A0E000007 /* decroom_no_lidar/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = decroom_no_lidar/Assets.xcassets; sourceTree = "<group>"; };
+		C201A108EAF54A0E000008 /* decroom_no_lidar/UploadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/UploadService.swift; sourceTree = "<group>"; };
+		C201A109EAF54A0E000009 /* decroom_no_lidar/RoomStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/RoomStore.swift; sourceTree = "<group>"; };
+		C201A10AEAF54A0E00000A /* decroom_no_lidar/MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/MainTabView.swift; sourceTree = "<group>"; };
+		C201A10BEAF54A0E00000B /* decroom_no_lidar/HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/HomeView.swift; sourceTree = "<group>"; };
+		C201A10CEAF54A0E00000C /* decroom_no_lidar/RoomCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/RoomCardView.swift; sourceTree = "<group>"; };
+		C201A10DEAF54A0E00000D /* decroom_no_lidar/CaptureFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/CaptureFlowView.swift; sourceTree = "<group>"; };
+		C201A10EEAF54A0E00000E /* decroom_no_lidar/CoverageEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/CoverageEngine.swift; sourceTree = "<group>"; };
+		C201A111EAF54A0E000011 /* decroom_no_lidar/ScanGuidanceOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/ScanGuidanceOverlayView.swift; sourceTree = "<group>"; };
+		C201A112EAF54A0E000012 /* decroom_no_lidar/ServerDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/ServerDiscovery.swift; sourceTree = "<group>"; };
+		C201A113EAF54A0E000013 /* decroom_no_lidar/FurnitureScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = decroom_no_lidar/FurnitureScanView.swift; sourceTree = "<group>"; };
+		C301A201EAF54A0E000021 /* decroom_no_lidar/kenney_bed.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_bed.usdz; sourceTree = "<group>"; };
+		C301A202EAF54A0E000022 /* decroom_no_lidar/kenney_bookshelf.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_bookshelf.usdz; sourceTree = "<group>"; };
+		C301A203EAF54A0E000023 /* decroom_no_lidar/kenney_chair.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_chair.usdz; sourceTree = "<group>"; };
+		C301A204EAF54A0E000024 /* decroom_no_lidar/kenney_desk.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_desk.usdz; sourceTree = "<group>"; };
+		C301A205EAF54A0E000025 /* decroom_no_lidar/kenney_dresser.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_dresser.usdz; sourceTree = "<group>"; };
+		C301A206EAF54A0E000026 /* decroom_no_lidar/kenney_lamp_desk.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_lamp_desk.usdz; sourceTree = "<group>"; };
+		C301A207EAF54A0E000027 /* decroom_no_lidar/kenney_lamp_floor.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_lamp_floor.usdz; sourceTree = "<group>"; };
+		C301A208EAF54A0E000028 /* decroom_no_lidar/kenney_monitor.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_monitor.usdz; sourceTree = "<group>"; };
+		C301A209EAF54A0E000029 /* decroom_no_lidar/kenney_nightstand.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_nightstand.usdz; sourceTree = "<group>"; };
+		C301A20AEAF54A0E00002A /* decroom_no_lidar/kenney_plant.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_plant.usdz; sourceTree = "<group>"; };
+		C301A20BEAF54A0E00002B /* decroom_no_lidar/kenney_rug.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_rug.usdz; sourceTree = "<group>"; };
+		C301A20CEAF54A0E00002C /* decroom_no_lidar/kenney_sofa.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_sofa.usdz; sourceTree = "<group>"; };
+		C301A20DEAF54A0E00002D /* decroom_no_lidar/kenney_table.usdz */ = {isa = PBXFileReference; lastKnownFileType = file.usdz; path = decroom_no_lidar/kenney_table.usdz; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		823BDE3E2EED1A2A00318522 /* Exceptions for "decroom_no_lidar" folder in "decroom_no_lidar" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Assets.xcassets,
+				CaptureFlowView.swift,
+				ContentView.swift,
+				CoverageEngine.swift,
+				decroom_no_lidarApp.swift,
+				HomeView.swift,
+				kenney_bed.usdz,
+				kenney_bookshelf.usdz,
+				kenney_chair.usdz,
+				kenney_desk.usdz,
+				kenney_dresser.usdz,
+				kenney_lamp_desk.usdz,
+				kenney_lamp_floor.usdz,
+				kenney_monitor.usdz,
+				kenney_nightstand.usdz,
+				kenney_plant.usdz,
+				kenney_rug.usdz,
+				kenney_sofa.usdz,
+				kenney_table.usdz,
+				MainTabView.swift,
+				RecordingProcessor.swift,
+				RoomCardView.swift,
+				RoomModels.swift,
+				RoomSceneView.swift,
+				RoomStore.swift,
+				ScanGuidanceOverlayView.swift,
+				ServerDiscovery.swift,
+				FurnitureScanView.swift,
+				UploadService.swift,
+				VideoRecorderView.swift,
+			);
+			target = 821EA1252EDAC64500829599 /* decroom_no_lidar */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		821EA1282EDAC64500829599 /* decroom_no_lidar */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				823BDE3E2EED1A2A00318522 /* Exceptions for "decroom_no_lidar" folder in "decroom_no_lidar" target */,
+			);
+			path = decroom_no_lidar;
+			sourceTree = "<group>";
+		};
+		821EA1392EDAC64700829599 /* decroom_no_lidarTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = decroom_no_lidarTests;
+			sourceTree = "<group>";
+		};
+		821EA1432EDAC64700829599 /* decroom_no_lidarUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = decroom_no_lidarUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		821EA1232EDAC64500829599 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		821EA1332EDAC64700829599 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		821EA13D2EDAC64700829599 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		821EA11D2EDAC64500829599 = {
+			isa = PBXGroup;
+			children = (
+				821EA1282EDAC64500829599 /* decroom_no_lidar */,
+				821EA1392EDAC64700829599 /* decroom_no_lidarTests */,
+				821EA1432EDAC64700829599 /* decroom_no_lidarUITests */,
+				821EA1272EDAC64500829599 /* Products */,
+				823BDDD52EEB04FB00318522 /* Recovered References */,
+			);
+			sourceTree = "<group>";
+		};
+		821EA1272EDAC64500829599 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				821EA1262EDAC64500829599 /* decroom_no_lidar.app */,
+				821EA1362EDAC64700829599 /* decroom_no_lidarTests.xctest */,
+				821EA1402EDAC64700829599 /* decroom_no_lidarUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		823BDDD52EEB04FB00318522 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				C201A102EAF54A0E000002 /* decroom_no_lidar/decroom_no_lidarApp.swift */,
+				C201A101EAF54A0E000001 /* decroom_no_lidar/ContentView.swift */,
+				C201A103EAF54A0E000003 /* decroom_no_lidar/VideoRecorderView.swift */,
+				C201A104EAF54A0E000004 /* decroom_no_lidar/RecordingProcessor.swift */,
+				C201A105EAF54A0E000005 /* decroom_no_lidar/RoomModels.swift */,
+				C201A106EAF54A0E000006 /* decroom_no_lidar/RoomSceneView.swift */,
+				C201A107EAF54A0E000007 /* decroom_no_lidar/Assets.xcassets */,
+				C201A108EAF54A0E000008 /* decroom_no_lidar/UploadService.swift */,
+				C201A109EAF54A0E000009 /* decroom_no_lidar/RoomStore.swift */,
+				C201A10AEAF54A0E00000A /* decroom_no_lidar/MainTabView.swift */,
+				C201A10BEAF54A0E00000B /* decroom_no_lidar/HomeView.swift */,
+				C201A10CEAF54A0E00000C /* decroom_no_lidar/RoomCardView.swift */,
+				C201A10DEAF54A0E00000D /* decroom_no_lidar/CaptureFlowView.swift */,
+				C201A10EEAF54A0E00000E /* decroom_no_lidar/CoverageEngine.swift */,
+				C201A111EAF54A0E000011 /* decroom_no_lidar/ScanGuidanceOverlayView.swift */,
+				C201A112EAF54A0E000012 /* decroom_no_lidar/ServerDiscovery.swift */,
+				C201A113EAF54A0E000013 /* decroom_no_lidar/FurnitureScanView.swift */,
+				C301A201EAF54A0E000021 /* decroom_no_lidar/kenney_bed.usdz */,
+				C301A202EAF54A0E000022 /* decroom_no_lidar/kenney_bookshelf.usdz */,
+				C301A203EAF54A0E000023 /* decroom_no_lidar/kenney_chair.usdz */,
+				C301A204EAF54A0E000024 /* decroom_no_lidar/kenney_desk.usdz */,
+				C301A205EAF54A0E000025 /* decroom_no_lidar/kenney_dresser.usdz */,
+				C301A206EAF54A0E000026 /* decroom_no_lidar/kenney_lamp_desk.usdz */,
+				C301A207EAF54A0E000027 /* decroom_no_lidar/kenney_lamp_floor.usdz */,
+				C301A208EAF54A0E000028 /* decroom_no_lidar/kenney_monitor.usdz */,
+				C301A209EAF54A0E000029 /* decroom_no_lidar/kenney_nightstand.usdz */,
+				C301A20AEAF54A0E00002A /* decroom_no_lidar/kenney_plant.usdz */,
+				C301A20BEAF54A0E00002B /* decroom_no_lidar/kenney_rug.usdz */,
+				C301A20CEAF54A0E00002C /* decroom_no_lidar/kenney_sofa.usdz */,
+				C301A20DEAF54A0E00002D /* decroom_no_lidar/kenney_table.usdz */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		821EA1252EDAC64500829599 /* decroom_no_lidar */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 821EA14A2EDAC64700829599 /* Build configuration list for PBXNativeTarget "decroom_no_lidar" */;
+			buildPhases = (
+				821EA1222EDAC64500829599 /* Sources */,
+				821EA1232EDAC64500829599 /* Frameworks */,
+				821EA1242EDAC64500829599 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				821EA1282EDAC64500829599 /* decroom_no_lidar */,
+			);
+			name = decroom_no_lidar;
+			packageProductDependencies = (
+			);
+			productName = decroom_no_lidar;
+			productReference = 821EA1262EDAC64500829599 /* decroom_no_lidar.app */;
+			productType = "com.apple.product-type.application";
+		};
+		821EA1352EDAC64700829599 /* decroom_no_lidarTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 821EA14D2EDAC64700829599 /* Build configuration list for PBXNativeTarget "decroom_no_lidarTests" */;
+			buildPhases = (
+				821EA1322EDAC64700829599 /* Sources */,
+				821EA1332EDAC64700829599 /* Frameworks */,
+				821EA1342EDAC64700829599 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				821EA1382EDAC64700829599 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				821EA1392EDAC64700829599 /* decroom_no_lidarTests */,
+			);
+			name = decroom_no_lidarTests;
+			packageProductDependencies = (
+			);
+			productName = decroom_no_lidarTests;
+			productReference = 821EA1362EDAC64700829599 /* decroom_no_lidarTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		821EA13F2EDAC64700829599 /* decroom_no_lidarUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 821EA1502EDAC64700829599 /* Build configuration list for PBXNativeTarget "decroom_no_lidarUITests" */;
+			buildPhases = (
+				821EA13C2EDAC64700829599 /* Sources */,
+				821EA13D2EDAC64700829599 /* Frameworks */,
+				821EA13E2EDAC64700829599 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				821EA1422EDAC64700829599 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				821EA1432EDAC64700829599 /* decroom_no_lidarUITests */,
+			);
+			name = decroom_no_lidarUITests;
+			packageProductDependencies = (
+			);
+			productName = decroom_no_lidarUITests;
+			productReference = 821EA1402EDAC64700829599 /* decroom_no_lidarUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		821EA11E2EDAC64500829599 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1620;
+				LastUpgradeCheck = 1620;
+				TargetAttributes = {
+					821EA1252EDAC64500829599 = {
+						CreatedOnToolsVersion = 16.2;
+					};
+					821EA1352EDAC64700829599 = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = 821EA1252EDAC64500829599;
+					};
+					821EA13F2EDAC64700829599 = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = 821EA1252EDAC64500829599;
+					};
+				};
+			};
+			buildConfigurationList = 821EA1212EDAC64500829599 /* Build configuration list for PBXProject "decroom_no_lidar" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 821EA11D2EDAC64500829599;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 821EA1272EDAC64500829599 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				821EA1252EDAC64500829599 /* decroom_no_lidar */,
+				821EA1352EDAC64700829599 /* decroom_no_lidarTests */,
+				821EA13F2EDAC64700829599 /* decroom_no_lidarUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		821EA1242EDAC64500829599 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C201B107EAF54A0E000017 /* decroom_no_lidar/Assets.xcassets in Resources */,
+				C301B201EAF54A0E000031 /* decroom_no_lidar/kenney_bed.usdz in Resources */,
+				C301B202EAF54A0E000032 /* decroom_no_lidar/kenney_bookshelf.usdz in Resources */,
+				C301B203EAF54A0E000033 /* decroom_no_lidar/kenney_chair.usdz in Resources */,
+				C301B204EAF54A0E000034 /* decroom_no_lidar/kenney_desk.usdz in Resources */,
+				C301B205EAF54A0E000035 /* decroom_no_lidar/kenney_dresser.usdz in Resources */,
+				C301B206EAF54A0E000036 /* decroom_no_lidar/kenney_lamp_desk.usdz in Resources */,
+				C301B207EAF54A0E000037 /* decroom_no_lidar/kenney_lamp_floor.usdz in Resources */,
+				C301B208EAF54A0E000038 /* decroom_no_lidar/kenney_monitor.usdz in Resources */,
+				C301B209EAF54A0E000039 /* decroom_no_lidar/kenney_nightstand.usdz in Resources */,
+				C301B20AEAF54A0E00003A /* decroom_no_lidar/kenney_plant.usdz in Resources */,
+				C301B20BEAF54A0E00003B /* decroom_no_lidar/kenney_rug.usdz in Resources */,
+				C301B20CEAF54A0E00003C /* decroom_no_lidar/kenney_sofa.usdz in Resources */,
+				C301B20DEAF54A0E00003D /* decroom_no_lidar/kenney_table.usdz in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		821EA1342EDAC64700829599 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		821EA13E2EDAC64700829599 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		821EA1222EDAC64500829599 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C201B102EAF54A0E000012 /* decroom_no_lidar/decroom_no_lidarApp.swift in Sources */,
+				C201B101EAF54A0E000011 /* decroom_no_lidar/ContentView.swift in Sources */,
+				C201B103EAF54A0E000013 /* decroom_no_lidar/VideoRecorderView.swift in Sources */,
+				C201B104EAF54A0E000014 /* decroom_no_lidar/RecordingProcessor.swift in Sources */,
+				C201B105EAF54A0E000015 /* decroom_no_lidar/RoomModels.swift in Sources */,
+				C201B106EAF54A0E000016 /* decroom_no_lidar/RoomSceneView.swift in Sources */,
+				C201B108EAF54A0E000018 /* decroom_no_lidar/UploadService.swift in Sources */,
+				C201B109EAF54A0E000019 /* decroom_no_lidar/RoomStore.swift in Sources */,
+				C201B10AEAF54A0E00001A /* decroom_no_lidar/MainTabView.swift in Sources */,
+				C201B10BEAF54A0E00001B /* decroom_no_lidar/HomeView.swift in Sources */,
+				C201B10CEAF54A0E00001C /* decroom_no_lidar/RoomCardView.swift in Sources */,
+				C201B10DEAF54A0E00001D /* decroom_no_lidar/CaptureFlowView.swift in Sources */,
+				C201B10EEAF54A0E00001E /* decroom_no_lidar/CoverageEngine.swift in Sources */,
+				C201B111EAF54A0E000021 /* decroom_no_lidar/ScanGuidanceOverlayView.swift in Sources */,
+				C201B112EAF54A0E000022 /* decroom_no_lidar/ServerDiscovery.swift in Sources */,
+				C201B113EAF54A0E000023 /* decroom_no_lidar/FurnitureScanView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		821EA1322EDAC64700829599 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		821EA13C2EDAC64700829599 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		821EA1382EDAC64700829599 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 821EA1252EDAC64500829599 /* decroom_no_lidar */;
+			targetProxy = 821EA1372EDAC64700829599 /* PBXContainerItemProxy */;
+		};
+		821EA1422EDAC64700829599 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 821EA1252EDAC64500829599 /* decroom_no_lidar */;
+			targetProxy = 821EA1412EDAC64700829599 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		821EA1482EDAC64700829599 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		821EA1492EDAC64700829599 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		821EA14B2EDAC64700829599 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"decroom_no_lidar/Preview Content\"";
+				DEVELOPMENT_TEAM = KYRWH23729;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "decroom-no-lidar-Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to record your room video for 3D reconstruction.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio is captured with your room video.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jaejeon.decroom-no-lidar";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		821EA14C2EDAC64700829599 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"decroom_no_lidar/Preview Content\"";
+				DEVELOPMENT_TEAM = KYRWH23729;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "decroom-no-lidar-Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to record your room video for 3D reconstruction.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio is captured with your room video.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jaejeon.decroom-no-lidar";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		821EA14E2EDAC64700829599 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KYRWH23729;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jaejeon.decroom-no-lidarTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/decroom_no_lidar.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/decroom_no_lidar";
+			};
+			name = Debug;
+		};
+		821EA14F2EDAC64700829599 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KYRWH23729;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jaejeon.decroom-no-lidarTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/decroom_no_lidar.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/decroom_no_lidar";
+			};
+			name = Release;
+		};
+		821EA1512EDAC64700829599 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KYRWH23729;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jaejeon.decroom-no-lidarUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = decroom_no_lidar;
+			};
+			name = Debug;
+		};
+		821EA1522EDAC64700829599 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KYRWH23729;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.jaejeon.decroom-no-lidarUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = decroom_no_lidar;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		821EA1212EDAC64500829599 /* Build configuration list for PBXProject "decroom_no_lidar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				821EA1482EDAC64700829599 /* Debug */,
+				821EA1492EDAC64700829599 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		821EA14A2EDAC64700829599 /* Build configuration list for PBXNativeTarget "decroom_no_lidar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				821EA14B2EDAC64700829599 /* Debug */,
+				821EA14C2EDAC64700829599 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		821EA14D2EDAC64700829599 /* Build configuration list for PBXNativeTarget "decroom_no_lidarTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				821EA14E2EDAC64700829599 /* Debug */,
+				821EA14F2EDAC64700829599 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		821EA1502EDAC64700829599 /* Build configuration list for PBXNativeTarget "decroom_no_lidarUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				821EA1512EDAC64700829599 /* Debug */,
+				821EA1522EDAC64700829599 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 821EA11E2EDAC64500829599 /* Project object */;
+}

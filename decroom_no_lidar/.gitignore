@@ -1,0 +1,35 @@
+# Virtual environments
+.venv-sfm/
+.venv/
+venv/
+
+# ML model weights
+*.onnx
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp/debug outputs
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment files
+.env

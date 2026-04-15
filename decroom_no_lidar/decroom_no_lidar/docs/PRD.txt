@@ -1,0 +1,249 @@
+==============================================================
+=====================  DECROOM PRD v1.2  ======================
+==============================================================
+THIS IS A FULL PRD WRITTEN IN STRICT TEXT FORMAT FOR CURSOR.
+NO IMPLIED REQUIREMENTS — ALL REQUIREMENTS ARE EXPLICIT.
+NO MARKDOWN USED INSIDE THE DOCUMENT.
+==============================================================
+
+----------------------------------------------------------------
+SECTION 1 — PRODUCT SUMMARY
+----------------------------------------------------------------
+
+Decroom is an iOS mobile application that converts a short room video into a stylised 3D editable room model. The app uses a backend AI pipeline to detect room layout and furniture positions, then produces a structured JSON describing the room. The iOS app reconstructs the 3D scene using stylised assets and RealityKit. Users can edit the room freely: move, rotate, delete, add items, or import objects from other rooms. All elements must be fully editable. Removing any object must not leave any blank area; underlying walls and floors must appear complete because they are rendered independently from objects.
+
+The final output is not a photorealistic scan. It is a stylised, clean, low-poly/isometric aesthetic representation of the original room.
+
+----------------------------------------------------------------
+SECTION 2 — PRODUCT GOALS
+----------------------------------------------------------------
+
+Goal 1 — Convert any reasonable indoor room video into a usable JSON describing room envelope and objects.
+Goal 2 — Reconstruct a stylised 3D room using the JSON.
+Goal 3 — Ensure all objects in the room are independent, editable, selectable, movable, and deletable.
+Goal 4 — Guarantee no visual artifacts when removing objects (no blank patches).
+Goal 5 — Ensure deterministic, reproducible JSON output for the same video input.
+
+----------------------------------------------------------------
+SECTION 3 — USER REQUIREMENTS
+----------------------------------------------------------------
+
+R1 — User must record a video through the app.
+R2 — App must extract frames and upload them to backend.
+R3 — Backend must detect room geometry and object locations.
+R4 — App must display a stylised 3D room with editable objects.
+R5 — User can delete furniture or posters and the wall/floor behind must appear normal.
+R6 — User can add new objects from a library.
+R7 — User can import objects from other room scans.
+R8 — User can save and load designs locally.
+
+----------------------------------------------------------------
+SECTION 4 — INPUT VIDEO REQUIREMENTS
+----------------------------------------------------------------
+
+Video resolution: 720p or 1080p.
+Frame extraction: approx. 1 frame per 8 video frames.
+Minimum lighting: detection must work under typical indoor lighting.
+Video must show at least two walls and floor for successful layout.
+
+----------------------------------------------------------------
+SECTION 5 — AI PIPELINE REQUIREMENTS
+----------------------------------------------------------------
+
+Backend pipeline steps (all required):
+
+Step 1 — Receive list of frames extracted from video in chronological order.
+Step 2 — Run depth estimation using models such as ZoeDepth or MiDaS. Produce depth map per frame.
+Step 3 — Run object detection using YOLOv8 or DETR. Required categories:
+["bed", "desk", "chair", "table", "dresser", "nightstand", "lamp_floor", "lamp_desk", "plant", "bookshelf", "monitor", "sofa", "rug", "poster"]
+Step 4 — Track objects across frames using IoU matching or ByteTrack.
+Step 5 — Estimate room layout using Manhattan-world assumption. Output four walls, floor plane, ceiling height.
+Step 6 — Convert 2D object detections into approximate 3D coordinates using depth values (3D lifting).
+Step 7 — Normalise coordinates so floor center = (0, 0, 0).
+Step 8 — Assemble JSON output following strict schema below.
+Step 9 — Deterministic output: same input video must always produce same JSON.
+
+----------------------------------------------------------------
+SECTION 6 — JSON OUTPUT SCHEMA (STRICT)
+----------------------------------------------------------------
+
+Backend must ALWAYS return a JSON object with ALL fields defined as below. No fields may be omitted. Unknown values must be included with default values (0 or empty list).
+
+{
+  "room": {
+    "id": "string",
+    "width_m": float,
+    "length_m": float,
+    "height_m": float,
+    "walls": [
+      {
+        "id": "string",
+        "start": [float, float],
+        "end": [float, float],
+        "has_window": boolean,
+        "has_door": boolean
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "string",
+      "type": "string",
+      "asset_id": "string",
+      "position": {
+        "x": float,
+        "y": float,
+        "z": float
+      },
+      "rotation_y": float,
+      "scale": float,
+      "confidence": float,
+      "metadata": {
+        "width": float,
+        "length": float,
+        "height": float
+      }
+    }
+  ]
+}
+
+This schema must NEVER change during MVP development.
+
+----------------------------------------------------------------
+SECTION 7 — 3D RENDERING ENGINE REQUIREMENTS
+----------------------------------------------------------------
+
+The rendering engine MUST be RealityKit.
+
+Reasons:
+- Native SwiftUI integration.
+- Async .usdz loading support.
+- Entity-component model suitable for editing.
+- ARKit interop for future use.
+- Simpler than Unity for a single iOS developer.
+
+----------------------------------------------------------------
+SECTION 8 — ROOM RECONSTRUCTION REQUIREMENTS
+----------------------------------------------------------------
+
+The room MUST be reconstructed using two layers:
+
+LAYER 1 — ROOM ENVELOPE
+- One continuous floor plane mesh.
+- Four continuous wall plane meshes.
+- One ceiling plane mesh (optional for MVP).
+- Floor and wall materials must be fully continuous across entire surfaces.
+- Objects MUST NOT modify, cut, or alter these meshes in any way.
+- No texture baking into the wall or floor is allowed.
+- No mesh decals or boolean operations allowed.
+
+LAYER 2 — OBJECT INSTANCES
+- Each object (bed, desk, poster, lamp, rug, chair, plant, etc.) must be a separate ModelEntity.
+- Posters must be represented as thin rectangular planes offset slightly from wall (e.g., 0.01m).
+- Objects must sit in front of walls/floor and never alter envelope geometry.
+
+DELETION BEHAVIOR
+- Removing an object deletes ONLY the object's ModelEntity.
+- Walls and floors must always appear intact beneath objects.
+- No blank patches should ever be visible.
+
+MOVEMENT AND ROTATION
+- Position updates apply only to object transform.
+- Rotation is around Y-axis only.
+- No object influences any other object unless explicitly dragged by user.
+
+----------------------------------------------------------------
+SECTION 9 — OBJECT EDITABILITY REQUIREMENTS
+----------------------------------------------------------------
+
+All objects must support:
+- Tap selection (highlight visually).
+- Drag movement on X/Z plane.
+- Rotation via UI controls.
+- Deletion via UI controls.
+- Addition via object library.
+- Import from other rooms or object scans.
+
+----------------------------------------------------------------
+SECTION 10 — NON-FUNCTIONAL REQUIREMENTS
+----------------------------------------------------------------
+
+Performance:
+- Scene load time < 1.5 seconds with up to 40 objects.
+- Editing framerate >= 50 FPS on iPhone 12+.
+
+Backend:
+- Processing time target: 6–12 seconds.
+
+Compatibility:
+- iOS 15 or later.
+- No LiDAR hardware needed.
+
+Stability:
+- Must handle missing detections gracefully.
+- Backend must return fallback JSON with empty objects list on failure.
+
+Determinism:
+- All stochastic processes must use fixed seeds.
+
+----------------------------------------------------------------
+SECTION 11 — DATA MODELS (CLIENT SIDE)
+----------------------------------------------------------------
+
+AssetDefinition fields:
+- id (string)
+- displayName (string)
+- category (string)
+- modelFileName (string)
+- defaultScale (float)
+- boundingBox (vector of three floats)
+
+ObjectInstance fields:
+- id (UUID string)
+- assetId (string)
+- position (three floats)
+- rotationY (float)
+- scale (float)
+- confidence (float)
+
+----------------------------------------------------------------
+SECTION 12 — MVP SCOPE
+----------------------------------------------------------------
+
+MUST INCLUDE:
+- Video recording.
+- Frame extraction.
+- Upload to backend.
+- AI detection pipeline.
+- JSON reconstruction.
+- Stylised 3D rendering.
+- Selection/move/rotate/delete.
+- Object library.
+- Save/load JSON.
+- Object import.
+
+MUST NOT INCLUDE:
+- Real-time AR.
+- LiDAR.
+- Photorealistic scanning.
+- Marketplace.
+- Collaboration features.
+
+----------------------------------------------------------------
+SECTION 13 — ACCEPTANCE CRITERIA
+----------------------------------------------------------------
+
+A feature is complete when:
+1. It satisfies all functional requirements.
+2. It satisfies all rendering/editability requirements.
+3. Backend returns complete JSON deterministically.
+4. Room envelope appears visually continuous at all times.
+5. No blank patches appear after object deletion.
+6. Scene loads within 1.5 seconds.
+7. Editing stays above 50 FPS on supported devices.
+
+----------------------------------------------------------------
+END OF DOCUMENT
+==============================================================
+THIS PRD IS COMPLETE, EXPLICIT, AND SAFE FOR CURSOR.
+==============================================================
