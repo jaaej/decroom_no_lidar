@@ -91,6 +91,15 @@ Detects chip generation, ARKit capabilities, returns `.full | .reduced | .fallba
 **`ScanLogger.swift`**
 Writes per-scan JSON log to `~/Documents/scan_logs/{timestamp}_{room_id}.json`. Retention: last 50 scans. Accessible from Settings → Debug → Scan Logs with export/share. Included in upload payload for backend correlation.
 
+**`YoloRunner.swift`** (NEW)
+Wraps YOLOv8-seg Core ML model (~15MB). Runs at 1-2fps during capture. Outputs `[YoloDetection]` with category, confidence, 2D mask. Feeds into both keyframe selection (semantic richness) and post-upload consensus check.
+
+**`ObjectTracker.swift`** (NEW — on-device, simple)
+Maintains unique object instances across frames using nearest-neighbor in 3D position space (derived from YOLO mask centroid + phone depth). Not a full ByteTrack — just "same object seen twice" deduplication. Outputs a per-object best-frame index for keyframe selection.
+
+**`ObjectCorrectionView.swift`** (NEW)
+Overlay on `RoomSceneView` showing confidence indicators (pulse for medium, "?" for low). Tap handler opens action sheet (Delete / Rotate 90° / Move). Corrections update the `RoomPayload` in-place and persist with save.
+
 ### Modified: iOS
 
 **`UploadService.swift`**
@@ -114,6 +123,9 @@ Kept for fallback tier devices. No changes required.
 - `build_dense_colored_pointcloud()` removed when phone provides PLY directly. Keep for fallback path.
 - Add `load_phone_pointcloud(ply_bytes)` to accept pre-built cloud.
 - Add `verify_geometry_agreement(phone_walls, spatiallm_walls)` — logs when they disagree by > 15° yaw. Phone walls win.
+- Add `apply_wall_snapping(objects, walls, cfg)` — post-process SpatialLM output with semantic rules.
+- Add `merge_with_yolo_detections(slm_objects, yolo_detections, cfg)` — dual-model consensus logic. Collapses duplicates, flags unverified detections with confidence scores.
+- Add `compute_object_confidence(obj, yolo_match, view_count, size_plausible)` — per-object confidence score.
 
 **`pipeline/pipeline.py`**
 New conditional branch: if upload includes `room_geometry.json`, skip Steps -1 (SfM), 0 (pose refinement), 4 (layout), 5 (lifting). Use phone geometry + SpatialLM output directly. YOLO still runs for detection refinement.
@@ -225,6 +237,81 @@ Response:
 Only permitted text strings during capture:
 - **Scan complete**: "All walls captured! Tap Done." (green)
 - **Unrecoverable**: "AR not supported on this device." (red, once)
+
+## Semantic Reliability Layer
+
+The phone-first architecture fixes the *geometric* causes of misplacement (wrong poses, noisy depth, PCA misalignment). But semantic problems — duplicate detections, wrong orientation, category confusion — need explicit downstream handling. Four mechanisms:
+
+### 1. Dual-Model Consensus (YOLO on-device + SpatialLM backend)
+
+A single model's output is a guess; agreement between two models is evidence.
+
+**On-device**: Run YOLOv8-seg Core ML at 1-2fps during capture. For each detection:
+- Record category, confidence, 2D mask
+- Unproject mask centroid using phone's depth map → 3D position
+- Track unique instances across frames using simple nearest-neighbor assignment
+
+**On return from backend**: Compare YOLO local detections with SpatialLM output:
+
+| YOLO says | SpatialLM says | Outcome |
+|-----------|----------------|---------|
+| Bed at (2, 1.5) | Bed at (2.1, 1.4) | ✅ High confidence, keep SpatialLM's oriented bbox |
+| Bed at (2, 1.5) | Nothing | ⚠️ Use YOLO position, default orientation |
+| Nothing | Bed at (2, 1.5) | ⚠️ Medium confidence, keep with "?" flag |
+| 1 bed total | 2 beds at same position | ❌ SpatialLM hallucination — collapse to 1 at merged centroid |
+
+Directly addresses "2-3 beds from 1 bed" — SpatialLM duplicates are caught by YOLO's single detection.
+
+### 2. Semantic Wall-Snapping Rules
+
+Universal priors applied as post-processing after SpatialLM returns:
+
+| Category | Rule |
+|----------|------|
+| bed, dresser, wardrobe, bookshelf, sofa | Snap to nearest wall within 0.8m, rotate facing = wall normal |
+| desk | Snap to wall within 0.8m, or corner if two walls are equally close |
+| nightstand | Snap to wall within 0.5m (tighter — nightstands are against walls) |
+| monitor, TV | Orient perpendicular to nearest wall (facing into room) |
+| chair, stool, table (coffee/dining) | Freestanding, no snap |
+| lamp_floor, plant, rug | Freestanding, no snap |
+
+Applied backend-side after `parse_spatiallm_output()` in `spatiallm_layout.py`. Uses phone's `walls[]` as hard constraints. Directly addresses "bed in middle of room."
+
+### 3. Smart Keyframe Selection (detect-then-select)
+
+Selection criteria prioritize semantic richness, not just spatial diversity:
+
+1. **Spatial coverage**: cover full 360° yaw via farthest-point sampling (geometric)
+2. **Object coverage**: for each unique YOLO-detected object, include the frame with the highest confidence (semantic)
+3. **Quality**: drop frames with blur score < 120 or fewer than 5 ARKit feature points
+4. **Cap**: 10-15 keyframes total
+
+YOLO runs on-device during scanning (already added for consensus). It tracks unique object instances, so when selecting keyframes the phone knows "frame 34 had the clearest view of the bed, frame 67 had the clearest view of the desk." Backend gets the best view of each object.
+
+### 4. Per-Object Confidence + User Correction UI
+
+Every final object has a confidence score:
+
+```
+confidence = (agreement_score × 0.5) + (multi_view_score × 0.3) + (size_plausibility × 0.2)
+```
+
+Where:
+- `agreement_score`: 1.0 if YOLO and SpatialLM agree, 0.5 if only one, 0.3 for SpatialLM duplicate-collapse
+- `multi_view_score`: 1.0 if object seen in 3+ keyframes, scales down for fewer
+- `size_plausibility`: 1.0 if dimensions within typical range for category, lower otherwise
+
+In the 3D preview, confidence is visualized:
+- **High (>0.8)**: solid USDZ, no indicator
+- **Medium (0.5-0.8)**: subtle pulse animation
+- **Low (<0.5)**: translucent + small "?" icon
+
+Tap any object to open an action sheet:
+- **Delete** (wrong detection — most common)
+- **Rotate 90°** (orientation wrong)
+- **Move** (drag to new position — stretch goal)
+
+Corrections persist with the saved room and are included in scan logs (signal for improving the models over time).
 
 ## Upload & Post-Capture UX
 
@@ -359,20 +446,28 @@ Phase 1 — Foundation (Week 1):
 Phase 2 — On-device Geometry (Week 2):
 - `RoomGeometryBuilder.swift` from plane anchors
 - `PointCloudAccumulator.swift` with voxelization
-- `KeyframeSelector.swift` farthest-point sampling
+- `KeyframeSelector.swift` smart selection (spatial + semantic)
 
-Phase 3 — Visual Capture (Week 3):
+Phase 3 — On-device Semantics (Week 2-3):
+- `YoloRunner.swift` Core ML YOLOv8 integration
+- `ObjectTracker.swift` simple NN instance tracking
+- Integrate YOLO output into keyframe selection
+
+Phase 4 — Visual Capture (Week 3-4):
 - `ARRoomPreviewView.swift` grid shell + reticle + brightness + furniture
 - Failure state visuals
 - Replace `VideoRecorderView` for `.full`/`.reduced` tiers
 
-Phase 4 — Upload & Backend (Week 4):
-- New `UploadService` payload schema
-- Backend accepts `room_geometry` + `point_cloud` directly
+Phase 5 — Upload & Backend (Week 4):
+- New `UploadService` payload schema (includes YOLO detections)
+- Backend accepts `room_geometry` + `point_cloud` + `yolo_detections`
 - `verify_geometry_agreement()` cross-check
+- `apply_wall_snapping()` semantic rules
+- `merge_with_yolo_detections()` dual-model consensus
 - Short-circuit SfM/layout/lifting when phone geometry present
 
-Phase 5 — Testing & Polish (Week 5):
+Phase 6 — Correction UI + Testing (Week 5):
+- `ObjectCorrectionView.swift` confidence indicators + action sheet
 - ARWorldMap fixture capture
 - Device/room QA matrix
 - Log viewer in debug menu
@@ -382,6 +477,7 @@ Phase 5 — Testing & Polish (Week 5):
 
 - **Apple**: ARKit 6+ (iOS 16+), Core ML 7+ (iOS 17+), RealityKit 2+
 - **Apple models**: Depth Pro via Core ML (Apache 2.0, from apple/ml-depth-pro GitHub)
-- **Existing backend**: SpatialLM (unchanged), YOLO (unchanged), FastAPI
+- **On-device models**: YOLOv8-seg Core ML export (~15MB, AGPL), bundled with app
+- **Existing backend**: SpatialLM (unchanged), YOLO (still used for backend refinement), FastAPI
 
 No new backend dependencies required.
