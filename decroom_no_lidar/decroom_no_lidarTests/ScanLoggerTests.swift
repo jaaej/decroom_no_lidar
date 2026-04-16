@@ -31,15 +31,21 @@ struct ScanLoggerTests {
 
     @Test func retentionDropsOldFilesAboveLimit() throws {
         let dir = tempDir()
-        // Create 52 fake log files
+        // Create 52 fake log files with increasing filename timestamps.
+        // File i=0 has oldest timestamp, i=51 has newest.
+        let baseTimestamp = Int(Date().timeIntervalSince1970)
         for i in 0..<52 {
-            let timestamp = Int(Date().timeIntervalSince1970) - (52 - i) * 100
+            let timestamp = baseTimestamp - (52 - i) * 100
             let url = dir.appendingPathComponent("\(timestamp)_log\(i).json")
             try "{}".data(using: .utf8)!.write(to: url)
         }
         try ScanLogger.enforceRetention(directory: dir, keepLast: 50)
         let remaining = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         #expect(remaining.count == 50)
+        // The two oldest (i=0, i=1) should have been deleted.
+        #expect(!remaining.contains { $0.contains("log0.json") })
+        #expect(!remaining.contains { $0.contains("log1.json") })
+        #expect(remaining.contains { $0.contains("log51.json") })
     }
 
     // Helper: create a unique temp directory per test
