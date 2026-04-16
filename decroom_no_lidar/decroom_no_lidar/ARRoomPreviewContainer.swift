@@ -2,8 +2,10 @@
 //  ARRoomPreviewContainer.swift
 //  decroom_no_lidar
 //
-//  UIViewRepresentable bridging SwiftUI to an ARView with grid shell +
-//  reticle + solidifying walls. Feeds ARFrame updates into ScanSession.
+//  UIViewRepresentable bridging SwiftUI to an ARView. Renders only the
+//  guidance reticle in AR space — the wireframe grid shell was removed
+//  in favor of letting ARKit's plane visualization show captured walls
+//  directly. The reticle alone provides "look here next" guidance.
 //
 
 import SwiftUI
@@ -24,12 +26,7 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
         arView.session.run(config)
         arView.session.delegate = context.coordinator
 
-        // Add grid shell anchored at world origin (at camera spawn).
-        let shellAnchor = AnchorEntity(world: .zero)
-        shellAnchor.addChild(context.coordinator.gridShell.entity)
-        arView.scene.addAnchor(shellAnchor)
-
-        // Add reticle (world-anchored).
+        // Reticle (world-anchored).
         let reticleAnchor = AnchorEntity(world: .zero)
         reticleAnchor.addChild(context.coordinator.reticle.entity)
         arView.scene.addAnchor(reticleAnchor)
@@ -48,7 +45,6 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
 
     final class Coordinator: NSObject, ARSessionDelegate {
         let session: ScanSession
-        let gridShell = GridShellEntity(sideLength: 3.0)
         let reticle = CaptureReticle()
         var reticleAnchor: AnchorEntity?
 
@@ -88,7 +84,6 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
             let planes = anchors.compactMap { $0 as? ARPlaneAnchor }
             Task { @MainActor in
                 self.session.updatePlaneAnchors(planes)
-                self.solidifyGridFacesForPlanes(planes)
             }
         }
 
@@ -96,28 +91,7 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
             let planes = anchors.compactMap { $0 as? ARPlaneAnchor }
             Task { @MainActor in
                 self.session.updatePlaneAnchors(planes)
-                self.solidifyGridFacesForPlanes(planes)
             }
-        }
-
-        private func solidifyGridFacesForPlanes(_ planes: [ARPlaneAnchor]) {
-            for plane in planes {
-                let n = SIMD3<Float>(
-                    plane.transform.columns.2.x,
-                    plane.transform.columns.2.y,
-                    plane.transform.columns.2.z
-                )
-                // Which grid face is this plane closest to in normal direction?
-                let face = dominantFace(for: n)
-                gridShell.solidify(face: face)
-            }
-        }
-
-        private func dominantFace(for normal: SIMD3<Float>) -> String {
-            let ax = abs(normal.x), ay = abs(normal.y), az = abs(normal.z)
-            if ax > ay && ax > az { return normal.x > 0 ? "+x" : "-x" }
-            if ay > ax && ay > az { return normal.y > 0 ? "+y" : "-y" }
-            return normal.z > 0 ? "+z" : "-z"
         }
 
         private func cameraYaw(from transform: simd_float4x4) -> Float {
