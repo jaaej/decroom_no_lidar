@@ -10,6 +10,9 @@ venv/
 *.bin
 *.safetensors
 
+# Exception: bundle the on-device Core ML depth model weights
+!decroom_no_lidar/DepthModel.mlpackage/**/*.bin
+
 # macOS
 .DS_Store
 
