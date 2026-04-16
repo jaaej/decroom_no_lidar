@@ -39,10 +39,9 @@ enum DeviceCapabilities {
     static func currentChipGeneration() -> ChipGeneration {
         var systemInfo = utsname()
         uname(&systemInfo)
-        let identifier = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingUTF8: $0) ?? ""
-            }
+        let identifier = withUnsafeBytes(of: &systemInfo.machine) { raw -> String in
+            let cString = raw.bindMemory(to: CChar.self)
+            return String(cString: cString.baseAddress!)
         }
         return chipGeneration(forMachineIdentifier: identifier)
     }
@@ -66,6 +65,9 @@ enum DeviceCapabilities {
             return .a16  // iPhone 14 Pro, 14 Pro Max, 15, 15 Plus
         case "iPhone16,1", "iPhone16,2":
             return .a17pro  // iPhone 15 Pro, 15 Pro Max
+        // NOTE: iPhone 17,x identifiers are community-sourced and should be
+        // verified before release. iPhone 16e and other 2024/2025 variants
+        // may have additional identifiers that will fall through to .unknown.
         case "iPhone17,1", "iPhone17,2":
             return .a18pro  // iPhone 16 Pro, 16 Pro Max
         case "iPhone17,3", "iPhone17,4":
