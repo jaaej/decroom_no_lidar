@@ -100,6 +100,15 @@ Maintains unique object instances across frames using nearest-neighbor in 3D pos
 **`ObjectCorrectionView.swift`** (NEW)
 Overlay on `RoomSceneView` showing confidence indicators (pulse for medium, "?" for low). Tap handler opens action sheet (Delete / Rotate 90° / Move). Corrections update the `RoomPayload` in-place and persist with save.
 
+**`RoomToolbarView.swift`** (NEW)
+Vertical floating toolbar on the right side of the 3D room preview. Semi-transparent rounded background with 16pt padding from screen edge. Initial button: Add Furniture. Room reserved for future buttons (save, share, edit, etc.) via dynamic VStack layout.
+
+**`FurnitureLibraryView.swift`** (NEW)
+Side panel slide-in view showing all 13 Kenney USDZ models in a 2-column grid with preview renders and category names. Search bar at top. Tapping a model closes the panel and spawns the model at room center, entering placement mode on `RoomSceneView`.
+
+**`FurniturePlacementHandler`** (extension on `RoomSceneView`)
+Handles selection, drag-to-move, rotation, and deselection for user-placed models. Uses existing wall-snapping rules for applicable categories. Differentiates `source: "manual"` vs `source: "ml"` on saved `RoomPayload`.
+
 ### Modified: iOS
 
 **`UploadService.swift`**
@@ -251,16 +260,19 @@ A single model's output is a guess; agreement between two models is evidence.
 - Unproject mask centroid using phone's depth map → 3D position
 - Track unique instances across frames using simple nearest-neighbor assignment
 
-**On return from backend**: Compare YOLO local detections with SpatialLM output:
+**On return from backend**: Compare YOLO local detections with SpatialLM output. Matching is position-based (within 0.4m for most categories, 0.8m for large items like beds/sofas), NOT count-based. Rooms can legitimately have multiple beds, sofas, chairs — we only collapse detections that occupy the same 3D location.
 
 | YOLO says | SpatialLM says | Outcome |
 |-----------|----------------|---------|
 | Bed at (2, 1.5) | Bed at (2.1, 1.4) | ✅ High confidence, keep SpatialLM's oriented bbox |
-| Bed at (2, 1.5) | Nothing | ⚠️ Use YOLO position, default orientation |
+| Bed at (2, 1.5) | Nothing there | ⚠️ Use YOLO position, default orientation |
 | Nothing | Bed at (2, 1.5) | ⚠️ Medium confidence, keep with "?" flag |
-| 1 bed total | 2 beds at same position | ❌ SpatialLM hallucination — collapse to 1 at merged centroid |
+| Beds at (2, 1.5) and (4, 1.5) | Beds at (2, 1.5) and (4, 1.5) | ✅ Two real beds — keep both |
+| Bed at (2, 1.5) | Beds at (2, 1.5) AND (2.2, 1.6) | ❌ SpatialLM duplicate at same position — collapse to 1 (merged centroid) |
 
-Directly addresses "2-3 beds from 1 bed" — SpatialLM duplicates are caught by YOLO's single detection.
+Key principle: **no hardcoded instance caps**. A room with two beds is valid. We only collapse detections whose 3D positions overlap within category-specific merge distances.
+
+**Removes**: the `_INSTANCE_CAPS = {"bed": 2, "sofa": 2, ...}` dictionary currently in `lifting.py`. That was a symptom-level fix from an earlier iteration and conflicts with this design. Replaced with position-based dedup that works for any room.
 
 ### 2. Semantic Wall-Snapping Rules
 
@@ -287,6 +299,37 @@ Selection criteria prioritize semantic richness, not just spatial diversity:
 4. **Cap**: 10-15 keyframes total
 
 YOLO runs on-device during scanning (already added for consensus). It tracks unique object instances, so when selecting keyframes the phone knows "frame 34 had the clearest view of the bed, frame 67 had the clearest view of the desk." Backend gets the best view of each object.
+
+### 4a. Manual Furniture Library
+
+Users can browse and place their own furniture — complementing ML detection.
+
+**Entry point**: Vertical floating toolbar on the right side of the 3D room preview.
+
+**Toolbar design**:
+- Position: right edge with ~16pt padding (not touching screen edge)
+- Shape: rounded rectangle (20pt radius), semi-transparent background (`.ultraThinMaterial`)
+- Layout: vertical stack of 56×56 icon buttons, 8pt spacing
+- Initial button: **Add Furniture** (`plus.square.on.square` SF Symbol)
+- Reserves space for 4-5 future buttons (save, share, edit mode, etc.)
+- Height grows with buttons; centered vertically on screen
+
+**Furniture library browser** (`FurnitureLibraryView.swift`, NEW):
+- Slides in from the right as a side panel (60% screen width)
+- Grid layout: 2 columns of Kenney model thumbnails
+- Each tile: model preview render + category name (e.g., "Bed", "Desk")
+- Covers all 13 Kenney USDZs currently shipped
+- Search/filter bar at top for quick navigation
+
+**Placement flow**:
+1. Tap furniture in library → panel closes, model appears at center of room
+2. Model is "selected" (highlighted with outline, drag handles)
+3. Drag to reposition (snaps to walls for applicable categories using existing wall-snapping rules)
+4. Rotation button rotates 90° per tap
+5. Tap elsewhere → deselect, model persists in room
+6. User-placed furniture is saved with the room alongside ML-detected furniture
+
+**Tracking**: User-placed models tagged with `source: "manual"` in `RoomPayload.objects`. Differs from `source: "ml"` for detected ones. Useful for analytics (which categories do users manually add most? → improve detection priorities).
 
 ### 4. Per-Object Confidence + User Correction UI
 
@@ -466,8 +509,14 @@ Phase 5 — Upload & Backend (Week 4):
 - `merge_with_yolo_detections()` dual-model consensus
 - Short-circuit SfM/layout/lifting when phone geometry present
 
-Phase 6 — Correction UI + Testing (Week 5):
+Phase 6 — Correction UI + Furniture Library (Week 5):
 - `ObjectCorrectionView.swift` confidence indicators + action sheet
+- `RoomToolbarView.swift` floating vertical toolbar
+- `FurnitureLibraryView.swift` side panel with Kenney model grid
+- Manual placement handler (select/drag/rotate)
+- Update `RoomPayload` schema to include `source: "ml" | "manual"`
+
+Phase 7 — Testing + Polish (Week 5-6):
 - ARWorldMap fixture capture
 - Device/room QA matrix
 - Log viewer in debug menu
