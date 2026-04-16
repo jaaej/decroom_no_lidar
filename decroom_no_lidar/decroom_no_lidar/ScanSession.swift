@@ -6,6 +6,10 @@
 //  ARRoomPreviewView controller, fed by ARFrame updates from the session
 //  delegate. Publishes @Published state for the view to render.
 //
+//  Core ML models load on a background queue to avoid blocking main during
+//  view appearance — iOS watchdog kills apps that block main for too long
+//  on cold launch, and the depth + YOLO models together are ~70 MB.
+//
 
 import Foundation
 import ARKit
@@ -17,11 +21,12 @@ import simd
 final class ScanSession: ObservableObject {
     // Plan 1 components
     let logger: ScanLogger
-    let depthRunner: DepthRunner?
+    private(set) var depthRunner: DepthRunner?
     let geometryBuilder = RoomGeometryBuilder()
     let pointCloud = PointCloudAccumulator(voxelSize: 0.02, maxPoints: 500_000)
+
     // Plan 2 components
-    let yoloRunner: YoloRunner?
+    private(set) var yoloRunner: YoloRunner?
     var tracker = ObjectTracker(mergeDistanceByCategory: [
         "bed": 1.5, "couch": 1.5, "chair": 0.65, "dining table": 1.1,
         "tv": 0.8, "laptop": 0.5, "potted plant": 0.6
@@ -33,6 +38,7 @@ final class ScanSession: ObservableObject {
     )
     @Published var recentDetections: [YoloDetection] = []
     @Published var coverageProgress: Double = 0.0   // 0..1
+    @Published var modelsReady: Bool = false
 
     // Internal state
     private let ciContext = CIContext()
@@ -42,21 +48,28 @@ final class ScanSession: ObservableObject {
     private let yoloFrameInterval = 15  // run YOLO every 15th ARFrame (~2fps at 30fps)
 
     init() {
-        let logger = ScanLogger()
-        let depthRunner = try? DepthRunner()
-        let yoloRunner = try? YoloRunner()
-
-        self.logger = logger
-        self.depthRunner = depthRunner
-        self.yoloRunner = yoloRunner
-
+        self.logger = ScanLogger()
         logger.recordDevice(DeviceInfo.current())
         logger.logEvent("scan_started", at: 0)
-        if depthRunner == nil {
-            logger.logEvent("depth_runner_load_failed", at: 0)
-        }
-        if yoloRunner == nil {
-            logger.logEvent("yolo_runner_load_failed", at: 0)
+
+        // Load Core ML models on background queue so the view can appear
+        // immediately. Inference is gated on `modelsReady` and the optionals.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let depth = try? DepthRunner()
+            let yolo = try? YoloRunner()
+            await MainActor.run {
+                guard let self else { return }
+                self.depthRunner = depth
+                self.yoloRunner = yolo
+                self.modelsReady = (depth != nil) || (yolo != nil)
+                if depth == nil {
+                    self.logger.logEvent("depth_runner_load_failed", at: self.elapsed())
+                }
+                if yolo == nil {
+                    self.logger.logEvent("yolo_runner_load_failed", at: self.elapsed())
+                }
+                self.logger.logEvent("models_ready", at: self.elapsed())
+            }
         }
     }
 
@@ -64,18 +77,17 @@ final class ScanSession: ObservableObject {
     func update(frame: ARFrame) {
         frameIndex += 1
 
-        // Intrinsics for portrait (phone-held-vertical case)
+        // Skip ML inference until models are loaded — but pose tracking and
+        // plane anchors continue to work via the ARSession itself.
+        guard modelsReady else { return }
+
         let intrinsics = Intrinsics.make(from: frame.camera, portrait: true)
         let pose = frame.camera.transform
 
-        // Depth inference (run at the DepthRunner's target interval)
-        if let depth = depthRunner {
-            if frameIndex % 6 == 0 {  // ~5fps at 30fps ARKit
-                runDepth(frame: frame, intrinsics: intrinsics, pose: pose, depth: depth)
-            }
+        if let depth = depthRunner, frameIndex % 6 == 0 {
+            runDepth(frame: frame, intrinsics: intrinsics, pose: pose, depth: depth)
         }
 
-        // YOLO inference (infrequent)
         if let yolo = yoloRunner, frameIndex - lastYoloFrame >= yoloFrameInterval {
             lastYoloFrame = frameIndex
             runYolo(frame: frame, yolo: yolo)
@@ -107,7 +119,6 @@ final class ScanSession: ObservableObject {
                            intrinsics: Intrinsics,
                            pose: simd_float4x4,
                            depth: DepthRunner) {
-        // Convert YUV → BGRA at model input size
         let modelSize = CGSize(width: 518, height: 392)
         guard let bgra = PixelBufferRGB.convert(frame.capturedImage,
                                                   toSize: modelSize,
@@ -117,7 +128,6 @@ final class ScanSession: ObservableObject {
         }
         guard let result = try? depth.infer(pixelBuffer: bgra) else { return }
 
-        // Add to point cloud (relative depth — scale calibration TBD downstream)
         pointCloud.addDepthMap(
             result.depths,
             width: result.width,
@@ -131,7 +141,7 @@ final class ScanSession: ObservableObject {
                 height: result.height
             ),
             worldFromCamera: pose,
-            colorAt: { _, _ in SIMD3<UInt8>(128, 128, 128) },  // gray for now
+            colorAt: { _, _ in SIMD3<UInt8>(128, 128, 128) },
             pixelStride: 4
         )
 
@@ -151,14 +161,12 @@ final class ScanSession: ObservableObject {
         }
         self.recentDetections = dets
 
-        // Track each detection (best-effort 3D position via camera-forward approximation)
         let cameraPos = SIMD3<Float>(
             frame.camera.transform.columns.3.x,
             frame.camera.transform.columns.3.y,
             frame.camera.transform.columns.3.z
         )
         for d in dets where d.confidence > 0.5 {
-            // Rough position: camera position + 2m along camera forward
             let fwd = -SIMD3<Float>(
                 frame.camera.transform.columns.2.x,
                 frame.camera.transform.columns.2.y,
