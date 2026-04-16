@@ -39,6 +39,15 @@ struct DepthRunnerTests {
                      kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary
         CVPixelBufferCreate(kCFAllocatorDefault, width, height,
                             kCVPixelFormatType_32BGRA, attrs, &buffer)
-        return buffer!
+        guard let pb = buffer else {
+            fatalError("Failed to create test pixel buffer")
+        }
+        CVPixelBufferLockBaseAddress(pb, [])
+        if let base = CVPixelBufferGetBaseAddress(pb) {
+            let bytesPerRow = CVPixelBufferGetBytesPerRow(pb)
+            memset(base, 0, bytesPerRow * height)
+        }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        return pb
     }
 }

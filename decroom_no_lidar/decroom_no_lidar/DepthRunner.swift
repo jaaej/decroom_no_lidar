@@ -10,34 +10,37 @@
 import Foundation
 import CoreML
 import CoreVideo
-import Vision
 
 struct DepthResult {
     let width: Int
     let height: Int
-    let depths: [Float]  // Row-major width*height relative depth values
+    /// Row-major width*height relative (unitless) depth values.
+    /// Scale calibration against ARKit feature points happens downstream.
+    let depths: [Float]
 }
 
 enum DepthRunnerError: Error {
     case modelLoadFailed
-    case inferenceFailed
     case unexpectedOutput
 }
 
 final class DepthRunner {
     private let model: MLModel
+    private let syncQueue = DispatchQueue(label: "decroom.depth-runner", qos: .userInitiated)
+    private var _targetFrameInterval: TimeInterval = 0.2  // 5fps default
 
-    /// Target time between inference calls (seconds). Adjusted by thermal state.
-    private(set) var targetFrameInterval: TimeInterval = 0.2  // 5fps default
+    /// Target time between inference calls (seconds). Thread-safe.
+    var targetFrameInterval: TimeInterval {
+        syncQueue.sync { _targetFrameInterval }
+    }
 
     init() throws {
         let config = MLModelConfiguration()
         config.computeUnits = .all  // Neural Engine if available
-        guard let url = Bundle.main.url(forResource: "DepthModel", withExtension: "mlmodelc"),
-              let loaded = try? MLModel(contentsOf: url, configuration: config) else {
+        guard let url = Bundle.main.url(forResource: "DepthModel", withExtension: "mlmodelc") else {
             throw DepthRunnerError.modelLoadFailed
         }
-        self.model = loaded
+        self.model = try MLModel(contentsOf: url, configuration: config)
     }
 
     /// Run inference on a pixel buffer. Returns relative depth map at the model's native resolution.
@@ -75,7 +78,7 @@ final class DepthRunner {
 
         let count = multiArray.count
         var depths = [Float](repeating: 0, count: count)
-        let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: count)
+        let ptr = multiArray.dataPointer.assumingMemoryBound(to: Float.self)
         for i in 0..<count {
             depths[i] = ptr[i]
         }
@@ -102,7 +105,7 @@ final class DepthRunner {
             // Float16 grayscale — upcast to Float32.
             for y in 0..<height {
                 let row = base.advanced(by: y * bytesPerRow)
-                    .bindMemory(to: UInt16.self, capacity: width)
+                    .assumingMemoryBound(to: UInt16.self)
                 for x in 0..<width {
                     depths[y * width + x] = Float(Float16(bitPattern: row[x]))
                 }
@@ -110,7 +113,7 @@ final class DepthRunner {
         case kCVPixelFormatType_OneComponent32Float, kCVPixelFormatType_DepthFloat32:
             for y in 0..<height {
                 let row = base.advanced(by: y * bytesPerRow)
-                    .bindMemory(to: Float.self, capacity: width)
+                    .assumingMemoryBound(to: Float.self)
                 for x in 0..<width {
                     depths[y * width + x] = row[x]
                 }
@@ -118,7 +121,7 @@ final class DepthRunner {
         case kCVPixelFormatType_OneComponent8:
             for y in 0..<height {
                 let row = base.advanced(by: y * bytesPerRow)
-                    .bindMemory(to: UInt8.self, capacity: width)
+                    .assumingMemoryBound(to: UInt8.self)
                 for x in 0..<width {
                     depths[y * width + x] = Float(row[x]) / 255.0
                 }
@@ -132,17 +135,19 @@ final class DepthRunner {
 
     /// Adjust inference rate based on thermal state. Call when thermal state changes.
     func updateThermalState(_ state: ProcessInfo.ThermalState) {
+        let newInterval: TimeInterval
         switch state {
         case .nominal:
-            targetFrameInterval = 0.2   // 5fps
+            newInterval = 0.2   // 5fps
         case .fair:
-            targetFrameInterval = 0.3   // ~3fps
+            newInterval = 0.3   // ~3fps
         case .serious:
-            targetFrameInterval = 0.5   // 2fps
+            newInterval = 0.5   // 2fps
         case .critical:
-            targetFrameInterval = 1.0   // 1fps
+            newInterval = 1.0   // 1fps
         @unknown default:
-            targetFrameInterval = 0.3
+            newInterval = 0.3
         }
+        syncQueue.async { self._targetFrameInterval = newInterval }
     }
 }
