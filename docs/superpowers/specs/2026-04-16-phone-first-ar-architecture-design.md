@@ -226,6 +226,34 @@ Only permitted text strings during capture:
 - **Scan complete**: "All walls captured! Tap Done." (green)
 - **Unrecoverable**: "AR not supported on this device." (red, once)
 
+## Upload & Post-Capture UX
+
+The room shell exists on the phone before upload begins, so there is **no blocking loader** during the backend trip. The user transitions directly into an interactive 3D preview and watches furniture populate.
+
+### Sequence
+
+| Time | State |
+|------|-------|
+| t=0 | User taps "Done". Smooth transition from AR capture → orbital 3D preview. |
+| t=0-0.3s | Walls + floor render as solid textured surfaces (from phone-side geometry). Empty but fully interactive (rotate, pan, zoom). |
+| t=0.1s | Background upload begins. Subtle status strip at top: thin progress line + "Finding furniture..." |
+| t=5-10s | Progress line fills as backend processes. Status may update to "Placing furniture..." once. No other UI changes. |
+| t=10-15s | Backend returns RoomPayload. Progress strip fades out. |
+| t=10-15s+ | Furniture fades in one item at a time. Each: 0.4s fade from ghost shape → solid USDZ. 0.15s stagger between items. |
+| t=complete | "Save Room" / "Rescan" buttons appear. Full interactivity. |
+
+### Failure States
+
+- **Upload fails** (no network, timeout): progress strip turns amber, text becomes "Tap to retry." Room shell remains interactive. User can save an empty room or retry upload.
+- **Backend timeout** (> 60s): same as upload fail. Non-blocking.
+- **No furniture detected** (SpatialLM returns 0 objects): room saved with empty object list. Valid state.
+
+### Principles
+
+- Never block user interaction with a spinner
+- Progress is additive (furniture appears), never subtractive (walls disappearing)
+- The room always exists from t=0, even if backend never returns
+
 ## Error Handling
 
 Graceful degradation chain:
