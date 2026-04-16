@@ -64,6 +64,31 @@ struct RoomGeometryBuilderTests {
         let snappedToPiOver2 = abs(abs(yaw) - .pi / 2) < snapTolerance
         #expect(snappedToZero || snappedToPiOver2)
     }
+
+    @Test func nonSnappingYawPointsInCorrectDirection() {
+        // 15° rotation is outside the snap zone (0.1 rad tolerance) —
+        // builder must return a yaw close to the actual rotation, not snapped.
+        // This guards against sign/axis swap regressions.
+        let angle: Float = .pi / 12  // 15°
+        let rotated = simd_quatf(angle: angle, axis: SIMD3(0, 1, 0))
+        let normal = rotated.act(SIMD3<Float>(0, 0, 1))
+        let wall = MockWall(center: SIMD3(0, 1.25, -1.5),
+                             normal: normal,
+                             width: 3.0, height: 2.5)
+        let floor = MockPlane(identifier: UUID(), planeAlignment: .horizontal,
+                              worldY: 0.0, extents: SIMD3(3, 0, 3))
+
+        let builder = RoomGeometryBuilder()
+        let geometry = builder.build(from: [floor, wall])
+
+        // manhattanYaw is folded via 2*yaw, so the returned yaw should be
+        // within ±0.02 rad of ±angle (mod pi/2). Not strictly 0 or pi/2.
+        let yaw = geometry.manhattanYaw
+        let modulated = fmod(abs(yaw), .pi / 2)
+        let wrappedDistance = min(modulated, .pi / 2 - modulated)
+        let expectedDistance = min(angle, .pi / 2 - angle)
+        #expect(abs(wrappedDistance - expectedDistance) < 0.05)
+    }
 }
 
 // MARK: - Test Doubles

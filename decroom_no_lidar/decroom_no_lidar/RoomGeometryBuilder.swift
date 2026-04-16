@@ -69,13 +69,15 @@ final class RoomGeometryBuilder {
 
         for plane in verticals {
             let normalWorld = wallNormal(from: plane)
-            // Project onto XZ plane
+            // Project onto XZ floor plane: n.x holds world X, n.y holds world Z.
+            // (SIMD2 has no .z; we pack XZ into .x/.y for 2D angle math.)
             let nxz = SIMD2<Float>(normalWorld.x, normalWorld.z)
             let length = simd_length(nxz)
             guard length > 0.1 else { continue }
             let n = nxz / length
 
-            // Wall yaw is atan2(nx, nz). Use 2*yaw to fold opposite normals together.
+            // Wall yaw = atan2(worldX, worldZ). n.y represents world Z here.
+            // Use 2*yaw to fold opposite normals together (walls have two faces).
             let yaw = atan2(n.x, n.y)
             let weight = max(plane.extent.x, plane.extent.y)  // larger walls vote more
             sumSin += weight * sin(2 * yaw)
