@@ -63,18 +63,43 @@ final class YoloRunner {
         coordinates: MLMultiArray,
         frameIndex: Int
     ) -> [YoloDetection] {
-        let numBoxes = confidence.shape[1].intValue
-        let numClasses = confidence.shape[2].intValue
+        // Ultralytics CoreML NMS export shape varies by version. Handle both
+        // 2D [numBoxes, numClasses] and 3D [batch, numBoxes, numClasses].
+        let confShape = confidence.shape.map { $0.intValue }
+        let numBoxes: Int
+        let numClasses: Int
+        switch confShape.count {
+        case 2:
+            numBoxes = confShape[0]
+            numClasses = confShape[1]
+        case 3:
+            numBoxes = confShape[1]
+            numClasses = confShape[2]
+        default:
+            return []  // unexpected shape, skip this frame
+        }
+
+        // Sanity bounds — bail if either dim is zero or implausible.
+        guard numBoxes > 0, numBoxes < 10_000,
+              numClasses > 0, numClasses <= 1000 else {
+            return []
+        }
+
         let confPtr = confidence.dataPointer.assumingMemoryBound(to: Float.self)
         let coordPtr = coordinates.dataPointer.assumingMemoryBound(to: Float.self)
+        let confTotal = confidence.count
+        let coordTotal = coordinates.count
 
         var detections: [YoloDetection] = []
         for b in 0..<numBoxes {
-            // Find max class confidence for this box
+            let confBase = b * numClasses
+            // Defensive bounds guard against malformed multi-arrays.
+            guard confBase + numClasses <= confTotal else { break }
+
             var maxConf: Float = 0
             var maxClass = 0
             for c in 0..<numClasses {
-                let conf = confPtr[b * numClasses + c]
+                let conf = confPtr[confBase + c]
                 if conf > maxConf {
                     maxConf = conf
                     maxClass = c
@@ -83,11 +108,13 @@ final class YoloRunner {
             guard maxConf >= confidenceThreshold else { continue }
             let category = maxClass < COCO80.classes.count ? COCO80.classes[maxClass] : "unknown"
 
-            // bbox: (cx, cy, w, h) normalized to [0,1]
-            let cx = coordPtr[b * 4 + 0]
-            let cy = coordPtr[b * 4 + 1]
-            let w = coordPtr[b * 4 + 2]
-            let h = coordPtr[b * 4 + 3]
+            let coordBase = b * 4
+            guard coordBase + 4 <= coordTotal else { break }
+
+            let cx = coordPtr[coordBase + 0]
+            let cy = coordPtr[coordBase + 1]
+            let w = coordPtr[coordBase + 2]
+            let h = coordPtr[coordBase + 3]
             let rect = CGRect(
                 x: CGFloat(cx - w / 2),
                 y: CGFloat(cy - h / 2),
@@ -99,7 +126,7 @@ final class YoloRunner {
                 category: category,
                 confidence: maxConf,
                 bbox: rect,
-                mask: nil,  // segmentation masks require a different export path
+                mask: nil,
                 frameIndex: frameIndex
             ))
         }
