@@ -39,6 +39,10 @@ final class ScanSession: ObservableObject {
     @Published var modelsReady: Bool = false
     @Published var visitedYawBins: Set<Int> = []
 
+    // Panorama
+    let panorama = PanoramaBuffer()
+    @Published var panoramaVersion: Int = 0  // incremented on each addFrame to trigger SwiftUI redraw
+
     // Internal state
     private let mlQueue = DispatchQueue(label: "decroom.scan-session.ml", qos: .userInitiated)
     private let ciContext = CIContext()
@@ -48,7 +52,10 @@ final class ScanSession: ObservableObject {
     private var lastYoloFrame = -1
     private let depthFrameInterval = 6    // ~5fps at 30fps
     private let yoloFrameInterval = 15    // ~2fps at 30fps
+    private let panoramaFrameInterval = 10 // ~3fps for panorama capture
+    private var lastPanoramaFrame = -1
     private let totalYawBins = 24
+    private let panoContext = CIContext()
 
     init() {
         self.logger = ScanLogger()
@@ -85,6 +92,13 @@ final class ScanSession: ObservableObject {
         if normalizedYaw < 0 { normalizedYaw += 2 * .pi }
         let bin = Int(normalizedYaw / (2 * .pi) * Float(totalYawBins)) % totalYawBins
         visitedYawBins.insert(bin)
+
+        // Capture panorama keyframe (lightweight — just a CGImage projection)
+        if frameIndex - lastPanoramaFrame >= panoramaFrameInterval {
+            lastPanoramaFrame = frameIndex
+            let pitch = cameraPitch(from: frame.camera.transform)
+            capturePanoramaFrame(frame: frame, yaw: yaw, pitch: pitch)
+        }
 
         guard modelsReady else { return }
 
@@ -150,6 +164,22 @@ final class ScanSession: ObservableObject {
         let fx = -transform.columns.2.x
         let fz = -transform.columns.2.z
         return atan2(fx, fz)
+    }
+
+    private func cameraPitch(from transform: simd_float4x4) -> Float {
+        let fy = -transform.columns.2.y
+        let fxz = sqrt(transform.columns.2.x * transform.columns.2.x +
+                        transform.columns.2.z * transform.columns.2.z)
+        return atan2(fy, fxz)
+    }
+
+    private func capturePanoramaFrame(frame: ARFrame, yaw: Float, pitch: Float) {
+        let pixelBuffer = frame.capturedImage
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
+        guard let cgImage = panoContext.createCGImage(ciImage, from: ciImage.extent) else { return }
+        panorama.addFrame(cgImage, yawRadians: yaw, pitchRadians: pitch)
+        panoramaVersion += 1
+        coverageProgress = panorama.coverageFraction
     }
 
     /// Runs on mlQueue (background). Publishes results to main.
