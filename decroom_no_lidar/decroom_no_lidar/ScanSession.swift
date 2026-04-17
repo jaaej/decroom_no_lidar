@@ -2,13 +2,11 @@
 //  ScanSession.swift
 //  decroom_no_lidar
 //
-//  Coordinates Plan 1 + Plan 2 components during a scan. Owned by the
-//  ARRoomPreviewView controller, fed by ARFrame updates from the session
-//  delegate. Publishes @Published state for the view to render.
+//  Coordinates Plan 1 + Plan 2 components during a scan.
 //
-//  Core ML models load on a background queue to avoid blocking main during
-//  view appearance — iOS watchdog kills apps that block main for too long
-//  on cold launch, and the depth + YOLO models together are ~70 MB.
+//  ML inference (depth + YOLO) runs on a dedicated background queue to
+//  avoid blocking the main thread / AR camera. Only results are published
+//  back to MainActor for SwiftUI consumption.
 //
 
 import Foundation
@@ -37,23 +35,26 @@ final class ScanSession: ObservableObject {
         walls: [], floorHeight: 0, ceilingHeight: 0, manhattanYaw: 0
     )
     @Published var recentDetections: [YoloDetection] = []
-    @Published var coverageProgress: Double = 0.0   // 0..1
+    @Published var coverageProgress: Double = 0.0
     @Published var modelsReady: Bool = false
+    @Published var visitedYawBins: Set<Int> = []
 
     // Internal state
+    private let mlQueue = DispatchQueue(label: "decroom.scan-session.ml", qos: .userInitiated)
     private let ciContext = CIContext()
     private let startTime = Date()
     private var frameIndex = 0
+    private var lastDepthFrame = -1
     private var lastYoloFrame = -1
-    private let yoloFrameInterval = 15  // run YOLO every 15th ARFrame (~2fps at 30fps)
+    private let depthFrameInterval = 6    // ~5fps at 30fps
+    private let yoloFrameInterval = 15    // ~2fps at 30fps
+    private let totalYawBins = 24
 
     init() {
         self.logger = ScanLogger()
         logger.recordDevice(DeviceInfo.current())
         logger.logEvent("scan_started", at: 0)
 
-        // Load Core ML models on background queue so the view can appear
-        // immediately. Inference is gated on `modelsReady` and the optionals.
         Task.detached(priority: .userInitiated) { [weak self] in
             let depth = try? DepthRunner()
             let yolo = try? YoloRunner()
@@ -73,24 +74,54 @@ final class ScanSession: ObservableObject {
         }
     }
 
-    /// Called from ARSessionDelegate on each new frame.
+    /// Called from ARSessionDelegate on each new frame. Must be FAST —
+    /// only updates lightweight state. ML inference dispatched to mlQueue.
     func update(frame: ARFrame) {
         frameIndex += 1
 
-        // Skip ML inference until models are loaded — but pose tracking and
-        // plane anchors continue to work via the ARSession itself.
+        // Track yaw coverage for reticle guidance (lightweight, no ML)
+        let yaw = cameraYaw(from: frame.camera.transform)
+        var normalizedYaw = yaw
+        if normalizedYaw < 0 { normalizedYaw += 2 * .pi }
+        let bin = Int(normalizedYaw / (2 * .pi) * Float(totalYawBins)) % totalYawBins
+        visitedYawBins.insert(bin)
+
         guard modelsReady else { return }
 
-        let intrinsics = Intrinsics.make(from: frame.camera, portrait: true)
-        let pose = frame.camera.transform
+        // Dispatch depth inference to background (non-blocking)
+        if let depth = depthRunner, frameIndex - lastDepthFrame >= depthFrameInterval {
+            lastDepthFrame = frameIndex
+            let capturedImage = frame.capturedImage
+            let intrinsics = Intrinsics.make(from: frame.camera, portrait: true)
+            let pose = frame.camera.transform
+            let fi = frameIndex
 
-        if let depth = depthRunner, frameIndex % 6 == 0 {
-            runDepth(frame: frame, intrinsics: intrinsics, pose: pose, depth: depth)
+            mlQueue.async { [weak self] in
+                self?.runDepthBackground(
+                    capturedImage: capturedImage,
+                    intrinsics: intrinsics,
+                    pose: pose,
+                    depth: depth,
+                    frameIndex: fi
+                )
+            }
         }
 
+        // Dispatch YOLO inference to background (non-blocking)
         if let yolo = yoloRunner, frameIndex - lastYoloFrame >= yoloFrameInterval {
             lastYoloFrame = frameIndex
-            runYolo(frame: frame, yolo: yolo)
+            let capturedImage = frame.capturedImage
+            let cameraTransform = frame.camera.transform
+            let fi = frameIndex
+
+            mlQueue.async { [weak self] in
+                self?.runYoloBackground(
+                    capturedImage: capturedImage,
+                    cameraTransform: cameraTransform,
+                    yolo: yolo,
+                    frameIndex: fi
+                )
+            }
         }
     }
 
@@ -115,68 +146,94 @@ final class ScanSession: ObservableObject {
 
     private func elapsed() -> Double { Date().timeIntervalSince(startTime) }
 
-    private func runDepth(frame: ARFrame,
-                           intrinsics: Intrinsics,
-                           pose: simd_float4x4,
-                           depth: DepthRunner) {
+    private func cameraYaw(from transform: simd_float4x4) -> Float {
+        let fx = -transform.columns.2.x
+        let fz = -transform.columns.2.z
+        return atan2(fx, fz)
+    }
+
+    /// Runs on mlQueue (background). Publishes results to main.
+    private nonisolated func runDepthBackground(
+        capturedImage: CVPixelBuffer,
+        intrinsics: Intrinsics,
+        pose: simd_float4x4,
+        depth: DepthRunner,
+        frameIndex: Int
+    ) {
         let modelSize = CGSize(width: 518, height: 392)
-        guard let bgra = PixelBufferRGB.convert(frame.capturedImage,
+        let ciCtx = CIContext()  // per-call context for thread safety
+        guard let bgra = PixelBufferRGB.convert(capturedImage,
                                                   toSize: modelSize,
-                                                  ciContext: ciContext,
+                                                  ciContext: ciCtx,
                                                   rotateToPortrait: false) else {
             return
         }
         guard let result = try? depth.infer(pixelBuffer: bgra) else { return }
 
-        pointCloud.addDepthMap(
-            result.depths,
+        let scaledIntrinsics = Intrinsics(
+            fx: intrinsics.fx * Float(result.width) / Float(intrinsics.width),
+            fy: intrinsics.fy * Float(result.height) / Float(intrinsics.height),
+            cx: Float(result.width) / 2,
+            cy: Float(result.height) / 2,
             width: result.width,
-            height: result.height,
-            intrinsics: Intrinsics(
-                fx: intrinsics.fx * Float(result.width) / Float(intrinsics.width),
-                fy: intrinsics.fy * Float(result.height) / Float(intrinsics.height),
-                cx: Float(result.width) / 2,
-                cy: Float(result.height) / 2,
-                width: result.width,
-                height: result.height
-            ),
-            worldFromCamera: pose,
-            colorAt: { _, _ in SIMD3<UInt8>(128, 128, 128) },
-            pixelStride: 4
+            height: result.height
         )
 
-        coverageProgress = min(1.0, Double(pointCloud.count) / 50_000)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.pointCloud.addDepthMap(
+                result.depths,
+                width: result.width,
+                height: result.height,
+                intrinsics: scaledIntrinsics,
+                worldFromCamera: pose,
+                colorAt: { _, _ in SIMD3<UInt8>(128, 128, 128) },
+                pixelStride: 4
+            )
+            self.coverageProgress = min(1.0, Double(self.pointCloud.count) / 50_000)
+        }
     }
 
-    private func runYolo(frame: ARFrame, yolo: YoloRunner) {
+    /// Runs on mlQueue (background). Publishes results to main.
+    private nonisolated func runYoloBackground(
+        capturedImage: CVPixelBuffer,
+        cameraTransform: simd_float4x4,
+        yolo: YoloRunner,
+        frameIndex: Int
+    ) {
         let modelSize = CGSize(width: 640, height: 640)
-        guard let bgra = PixelBufferRGB.convert(frame.capturedImage,
+        let ciCtx = CIContext()
+        guard let bgra = PixelBufferRGB.convert(capturedImage,
                                                   toSize: modelSize,
-                                                  ciContext: ciContext,
+                                                  ciContext: ciCtx,
                                                   rotateToPortrait: true) else {
             return
         }
         guard let dets = try? yolo.infer(pixelBuffer: bgra, frameIndex: frameIndex) else {
             return
         }
-        self.recentDetections = dets
 
         let cameraPos = SIMD3<Float>(
-            frame.camera.transform.columns.3.x,
-            frame.camera.transform.columns.3.y,
-            frame.camera.transform.columns.3.z
+            cameraTransform.columns.3.x,
+            cameraTransform.columns.3.y,
+            cameraTransform.columns.3.z
         )
-        for d in dets where d.confidence > 0.5 {
-            let fwd = -SIMD3<Float>(
-                frame.camera.transform.columns.2.x,
-                frame.camera.transform.columns.2.y,
-                frame.camera.transform.columns.2.z
-            )
-            let approxPos = cameraPos + fwd * 2
-            tracker.observe(category: d.category,
-                             worldPosition: approxPos,
-                             confidence: d.confidence,
-                             frameIndex: frameIndex)
+        let fwd = -SIMD3<Float>(
+            cameraTransform.columns.2.x,
+            cameraTransform.columns.2.y,
+            cameraTransform.columns.2.z
+        )
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.recentDetections = dets
+            for d in dets where d.confidence > 0.5 {
+                let approxPos = cameraPos + fwd * 2
+                self.tracker.observe(category: d.category,
+                                      worldPosition: approxPos,
+                                      confidence: d.confidence,
+                                      frameIndex: frameIndex)
+            }
         }
     }
 }

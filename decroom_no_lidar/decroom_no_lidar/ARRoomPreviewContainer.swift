@@ -2,10 +2,11 @@
 //  ARRoomPreviewContainer.swift
 //  decroom_no_lidar
 //
-//  UIViewRepresentable bridging SwiftUI to an ARView. Renders only the
-//  guidance reticle in AR space — the wireframe grid shell was removed
-//  in favor of letting ARKit's plane visualization show captured walls
-//  directly. The reticle alone provides "look here next" guidance.
+//  UIViewRepresentable bridging SwiftUI to an ARView. Renders the
+//  guidance reticle in AR space and feeds ARFrame updates into ScanSession.
+//
+//  Re-entrancy guard: drops frames if previous update is still in-flight
+//  to prevent unbounded Task queue growth at 30fps.
 //
 
 import SwiftUI
@@ -30,14 +31,11 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
         let reticleAnchor = AnchorEntity(world: .zero)
         reticleAnchor.addChild(context.coordinator.reticle.entity)
         arView.scene.addAnchor(reticleAnchor)
-        context.coordinator.reticleAnchor = reticleAnchor
 
         return arView
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {
-        // State changes pushed via Coordinator.
-    }
+    func updateUIView(_ uiView: ARView, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(session: session)
@@ -46,7 +44,7 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
     final class Coordinator: NSObject, ARSessionDelegate {
         let session: ScanSession
         let reticle = CaptureReticle()
-        var reticleAnchor: AnchorEntity?
+        private var isProcessing = false  // re-entrancy guard
 
         init(session: ScanSession) {
             self.session = session
@@ -54,17 +52,22 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
         }
 
         func session(_ arSession: ARSession, didUpdate frame: ARFrame) {
-            Task { @MainActor in
+            // Drop frame if previous update hasn't finished — prevents
+            // unbounded Task queue growth when ML inference is slow.
+            guard !isProcessing else { return }
+            isProcessing = true
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.isProcessing = false }
+
                 self.session.update(frame: frame)
-                // Move reticle per latest viewmodel direction
-                // Coverage bins left empty in Plan 2; a future Plan 3 task
-                // can wire the existing CoverageEngine's filledYawBins here.
-                // With empty bins, the reticle defaults to the first unfilled
-                // bin (bin 0 = world +Z), which biases toward "look forward".
+
+                // Move reticle toward the nearest unvisited yaw bin.
                 let vm = ARRoomPreviewViewModel(
                     cameraYaw: self.cameraYaw(from: frame.camera.transform),
                     wallsDetected: self.session.geometry.walls.count,
-                    coverageBinsFilled: [],
+                    coverageBinsFilled: self.session.visitedYawBins,
                     totalCoverageBins: 24
                 )
                 let camPos = SIMD3<Float>(
@@ -82,6 +85,7 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
 
         func session(_ arSession: ARSession, didAdd anchors: [ARAnchor]) {
             let planes = anchors.compactMap { $0 as? ARPlaneAnchor }
+            guard !planes.isEmpty else { return }
             Task { @MainActor in
                 self.session.updatePlaneAnchors(planes)
             }
@@ -89,13 +93,13 @@ struct ARRoomPreviewContainer: UIViewRepresentable {
 
         func session(_ arSession: ARSession, didUpdate anchors: [ARAnchor]) {
             let planes = anchors.compactMap { $0 as? ARPlaneAnchor }
+            guard !planes.isEmpty else { return }
             Task { @MainActor in
                 self.session.updatePlaneAnchors(planes)
             }
         }
 
         private func cameraYaw(from transform: simd_float4x4) -> Float {
-            // forward = -Z column
             let fx = -transform.columns.2.x
             let fz = -transform.columns.2.z
             return atan2(fx, fz)
