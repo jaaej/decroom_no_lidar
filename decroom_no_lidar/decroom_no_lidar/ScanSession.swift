@@ -40,9 +40,9 @@ final class ScanSession: ObservableObject {
     @Published var visitedYawBins: Set<Int> = []
     @Published var currentCameraYaw: Float = 0
 
-    // Panorama
-    let panorama = PanoramaBuffer()
-    @Published var panoramaVersion: Int = 0  // incremented on each addFrame to trigger SwiftUI redraw
+    // Panorama — array of (thumbnail, yaw) drawn directly on Canvas.
+    // Simpler and more reliable than equirectangular projection.
+    @Published var panoramaThumbnails: [(image: CGImage, yaw: Float)] = []
 
     // Internal state
     private let mlQueue = DispatchQueue(label: "decroom.scan-session.ml", qos: .userInitiated)
@@ -178,10 +178,17 @@ final class ScanSession: ObservableObject {
     private func capturePanoramaFrame(frame: ARFrame, yaw: Float, pitch: Float) {
         let pixelBuffer = frame.capturedImage
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
-        guard let cgImage = panoContext.createCGImage(ciImage, from: ciImage.extent) else { return }
-        panorama.addFrame(cgImage, yawRadians: yaw, pitchRadians: pitch)
-        panoramaVersion += 1
-        coverageProgress = panorama.coverageFraction
+
+        // Create a thumbnail (480×640) for the panorama strip.
+        // Full-res would use too much memory at 100+ frames.
+        let thumbW = 480
+        let thumbH = 640
+        let scale = CGFloat(thumbW) / ciImage.extent.width
+        let scaled = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cgImage = panoContext.createCGImage(scaled, from: CGRect(x: 0, y: 0, width: thumbW, height: thumbH)) else {
+            return
+        }
+        panoramaThumbnails.append((image: cgImage, yaw: yaw))
     }
 
     /// Runs on mlQueue (background). Publishes results to main.
