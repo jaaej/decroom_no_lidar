@@ -46,11 +46,7 @@ struct CaptureFlowView: View {
 
                 switch scanMode {
                 case .video:
-                    if DeviceCapabilities.currentTier != .fallback {
-                        ARRoomPreviewView()
-                    } else {
-                        VideoRecorderView(processor: processor)
-                    }
+                    VideoRecorderView(processor: processor)
                 case .photo:
                     ContentView(processor: processor)
                 case .furniture:
