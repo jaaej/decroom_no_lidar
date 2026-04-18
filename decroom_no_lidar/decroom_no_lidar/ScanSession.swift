@@ -38,6 +38,7 @@ final class ScanSession: ObservableObject {
     @Published var coverageProgress: Double = 0.0
     @Published var modelsReady: Bool = false
     @Published var visitedYawBins: Set<Int> = []
+    @Published var currentCameraYaw: Float = 0
 
     // Panorama
     let panorama = PanoramaBuffer()
@@ -86,8 +87,9 @@ final class ScanSession: ObservableObject {
     func update(frame: ARFrame) {
         frameIndex += 1
 
-        // Track yaw coverage for reticle guidance (lightweight, no ML)
+        // Track yaw — used for panorama scrolling + coverage tracking
         let yaw = cameraYaw(from: frame.camera.transform)
+        currentCameraYaw = yaw
         var normalizedYaw = yaw
         if normalizedYaw < 0 { normalizedYaw += 2 * .pi }
         let bin = Int(normalizedYaw / (2 * .pi) * Float(totalYawBins)) % totalYawBins
