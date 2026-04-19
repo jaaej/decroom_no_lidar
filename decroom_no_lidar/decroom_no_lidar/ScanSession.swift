@@ -40,6 +40,9 @@ final class ScanSession: ObservableObject {
     @Published var visitedYawBins: Set<Int> = []
     @Published var currentCameraYaw: Float = 0
 
+    /// Short scan identifier (hex, 8 chars) — useful for error messages.
+    var scanID: String { logger.scanId }
+
     // Panorama — array of (thumbnail, yaw) drawn directly on Canvas.
     // Simpler and more reliable than equirectangular projection.
     @Published var panoramaThumbnails: [(image: CGImage, yaw: Float)] = []

@@ -657,6 +657,10 @@ final class GuidedARFrameRecorder: ObservableObject {
     private var frames: [CGImage] = []
     private var shots: [GuidedShotPayload] = []
     private var latestFrame: ARFrame?
+    /// On-device phone-first session. Accumulates geometry, point cloud,
+    /// and keyframes in parallel with the existing video capture. Created
+    /// lazily on start() so the heavy model loads don't happen at app launch.
+    private(set) var scanSession: ScanSession?
     private let ciContext = CIContext()
     private var shotCounter: Int = 0
     private var lastCapturePosition: SIMD3<Float>? = nil
@@ -671,6 +675,7 @@ final class GuidedARFrameRecorder: ObservableObject {
     }
 
     func start() {
+        scanSession = ScanSession()
         clearScanFeedback()
         frames = []
         shots = []
@@ -707,6 +712,7 @@ final class GuidedARFrameRecorder: ObservableObject {
     @discardableResult
     func stop() -> CaptureResult {
         isRecording = false
+        // Keep scanSession alive — caller will invoke finalize() before releasing.
         if isVideoMode {
             unlockExposureAndFocus()
         }
@@ -722,6 +728,7 @@ final class GuidedARFrameRecorder: ObservableObject {
     /// Returns a CaptureResult using disk-based keyframe JPEGs (video mode)
     func stopVideoMode() -> (jpegPaths: [URL], metadataJSON: String?) {
         isRecording = false
+        // Keep scanSession alive — caller will invoke finalize() before releasing.
         unlockExposureAndFocus()
         let ordered = shots.sorted { $0.timestamp < $1.timestamp }
         let metadataJSON = buildMetadataJSON(shots: ordered)
@@ -796,6 +803,11 @@ final class GuidedARFrameRecorder: ObservableObject {
             guard let planeAnchor = anchor as? ARPlaneAnchor else { continue }
             livePlaneAnchors[planeAnchor.identifier] = planeAnchor
         }
+        // Also feed the phone-first room geometry builder
+        let planes = anchors.compactMap { $0 as? ARPlaneAnchor }
+        if !planes.isEmpty {
+            scanSession?.updatePlaneAnchors(planes)
+        }
     }
 
     func removePlaneAnchors(_ anchors: [ARAnchor]) {
@@ -803,6 +815,9 @@ final class GuidedARFrameRecorder: ObservableObject {
             guard let planeAnchor = anchor as? ARPlaneAnchor else { continue }
             livePlaneAnchors.removeValue(forKey: planeAnchor.identifier)
         }
+        // Re-send the surviving set so the geometry builder re-derives walls.
+        let surviving = Array(livePlaneAnchors.values)
+        scanSession?.updatePlaneAnchors(surviving)
     }
 
     func upsertMeshAnchors(_ anchors: [ARAnchor]) {
@@ -937,6 +952,9 @@ final class GuidedARFrameRecorder: ObservableObject {
                 evaluateKeyframeCandidate(frame: frame)
             }
         }
+
+        // Forward to phone-first pipeline (depth + geometry + keyframes)
+        scanSession?.update(frame: frame)
     }
 
     /// Capture the current frame asynchronously — image processing happens off the main thread
