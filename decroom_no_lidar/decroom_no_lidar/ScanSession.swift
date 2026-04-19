@@ -154,11 +154,79 @@ final class ScanSession: ObservableObject {
         }
     }
 
-    func finalize() -> (point_cloud_ply: Data, log_written: Bool) {
-        logger.logEvent("scan_finalized", at: elapsed())
-        let ply = pointCloud.exportPLY()
-        let logOK = (try? logger.finalize()) != nil
-        return (ply, logOK)
+    /// Produce the phone-first upload payload. Runs phone-side validation;
+    /// throws a named `ScanError` if the scan is not uploadable.
+    /// - Parameter keyframes: keyframe JPEGs + metadata assembled by the
+    ///   caller (GuidedARFrameRecorder owns the JPEG files and pose stream).
+    /// - Parameter totalYawBins: total bins the coverage engine split the
+    ///   360° rotation into. Currently 24 (15° each).
+    /// - Parameter requiredBins: minimum filled bins for a valid scan.
+    ///   Currently 12 (50%).
+    func finalize(
+        keyframes: [ScanUploadPayload.KeyframeMetadata],
+        keyframeJPEGs: [Data],
+        totalYawBins: Int = 24,
+        requiredBins: Int = 12
+    ) throws -> ScanUploadPayload {
+        logger.logEvent("scan_finalize_started", at: elapsed())
+
+        // NOTE: depth-model-load failures are surfaced separately at scan
+        // start (not here). finalize only validates that the scan produced
+        // enough data to upload.
+
+        // Phone-side validation.
+        guard !geometry.walls.isEmpty else {
+            logger.logEvent("scan_finalize_rejected_no_walls", at: elapsed())
+            throw ScanError.noWallsDetected
+        }
+        guard visitedYawBins.count >= requiredBins else {
+            logger.logEvent("scan_finalize_rejected_coverage", at: elapsed(),
+                            data: ["filled": "\(visitedYawBins.count)",
+                                   "required": "\(requiredBins)"])
+            throw ScanError.insufficientCoverage(
+                binsFilled: visitedYawBins.count,
+                binsRequired: requiredBins
+            )
+        }
+        guard keyframes.count == keyframeJPEGs.count else {
+            throw ScanError.payloadBuildFailed(detail: "keyframe metadata/jpeg count mismatch")
+        }
+
+        // Serialize components. Errors here → payloadBuildFailed.
+        let roomGeometryJSON: Data
+        do {
+            roomGeometryJSON = try ScanUploadPayload.encodeRoomGeometry(geometry)
+        } catch {
+            throw ScanError.payloadBuildFailed(detail: error.localizedDescription)
+        }
+
+        let plyData = pointCloud.exportPLY()
+
+        // Write log to disk (also keeps Plan 1's retention behavior).
+        let logData: Data
+        do {
+            try logger.finalize()
+            // Read back what we wrote for inclusion in the payload.
+            let dir = ScanLogger.defaultDirectory()
+            let file = "\(Int(logger.startedAt.timeIntervalSince1970))_\(logger.scanId).json"
+            logData = try Data(contentsOf: dir.appendingPathComponent(file))
+        } catch {
+            throw ScanError.payloadBuildFailed(detail: "scan log write: \(error.localizedDescription)")
+        }
+
+        logger.logEvent("scan_finalize_succeeded", at: elapsed(),
+                        data: ["walls": "\(geometry.walls.count)",
+                               "points": "\(pointCloud.count)",
+                               "keyframes": "\(keyframes.count)"])
+
+        return ScanUploadPayload(
+            scanID: logger.scanId,
+            roomGeometryJSON: roomGeometryJSON,
+            pointCloudPLY: plyData,
+            keyframes: zip(keyframeJPEGs, keyframes).map { ($0.0, $0.1) },
+            scanLogJSON: logData,
+            deviceInfo: DeviceInfo.current()
+        )
     }
 
     // MARK: - Private
