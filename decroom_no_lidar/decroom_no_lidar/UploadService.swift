@@ -288,6 +288,138 @@ struct UploadService {
             throw UploadError.decodingFailed(error.localizedDescription)
         }
     }
+
+    // MARK: - Phone-first upload (Plan 3a)
+
+    /// Upload a phone-first payload: geometry JSON, PLY, keyframes + manifest,
+    /// scan log. Maps backend 4xx/5xx/network errors into `ScanError` cases.
+    static func uploadPhoneFirst(_ payload: ScanUploadPayload) async throws -> RoomPayload {
+        let url: URL
+        do {
+            url = try await resolvePhoneFirstUploadURL()
+        } catch let e as ScanError {
+            throw e
+        } catch {
+            throw ScanError.uploadNoServer
+        }
+        print("[UploadService] Phone-first upload → \(url.absoluteString) (scan=\(payload.scanID))")
+
+        let boundary = UUID().uuidString
+
+        // Build multipart body off-thread (JPEG concat is cheap but keep main responsive).
+        let body: Data
+        do {
+            body = try await Task.detached(priority: .userInitiated) {
+                try UploadService._buildPhoneFirstMultipartBody(payload, boundary: boundary)
+            }.value
+        } catch {
+            throw ScanError.payloadBuildFailed(
+                detail: "multipart build: \(error.localizedDescription)"
+            )
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 60  // was 1800 for old SfM path; 60s is plenty for SpatialLM
+        request.httpBody = body
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 60
+        let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let err as URLError where err.code == .timedOut {
+            throw ScanError.uploadTimeout
+        } catch {
+            throw ScanError.uploadNoServer
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw ScanError.backendServerError(status: -1, detail: "non-HTTP response")
+        }
+
+        switch http.statusCode {
+        case 200:
+            do {
+                return try JSONDecoder().decode(RoomPayload.self, from: data)
+            } catch {
+                throw ScanError.backendSchemaError(
+                    scanID: payload.scanID,
+                    detail: "response decode: \(error.localizedDescription)"
+                )
+            }
+        case 400..<500:
+            let body = String(data: data, encoding: .utf8) ?? "(unparseable body)"
+            throw ScanError.backendSchemaError(scanID: payload.scanID, detail: body)
+        default:
+            let body = String(data: data, encoding: .utf8) ?? "(unparseable body)"
+            throw ScanError.backendServerError(status: http.statusCode, detail: body)
+        }
+    }
+
+    /// Resolves the phone-first upload URL (Bonjour first, fallback second).
+    /// Swaps the path component to `/api/upload/phone-first`.
+    private static func resolvePhoneFirstUploadURL() async throws -> URL {
+        let base = try await resolveUploadURL()
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw ScanError.uploadNoServer
+        }
+        components.path = "/api/upload/phone-first"
+        components.query = nil
+        guard let url = components.url else {
+            throw ScanError.uploadNoServer
+        }
+        return url
+    }
+
+    /// Exposed for tests — builds the multipart body without a network call.
+    static func _buildPhoneFirstMultipartBody(
+        _ payload: ScanUploadPayload,
+        boundary: String
+    ) throws -> Data {
+        var data = Data()
+        func appendPart(name: String, filename: String,
+                         contentType: String, bytes: Data) {
+            data.append("--\(boundary)\r\n")
+            data.append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
+            data.append("Content-Type: \(contentType)\r\n\r\n")
+            data.append(bytes)
+            data.append("\r\n")
+        }
+
+        let manifestJSON = try ScanUploadPayload.encodeKeyframesManifest(
+            payload.keyframes.map { $0.meta }
+        )
+
+        appendPart(name: "room_geometry", filename: "room_geometry.json",
+                    contentType: "application/json",
+                    bytes: payload.roomGeometryJSON)
+        appendPart(name: "point_cloud", filename: "point_cloud.ply",
+                    contentType: "application/octet-stream",
+                    bytes: payload.pointCloudPLY)
+        appendPart(name: "keyframes_manifest", filename: "keyframes.json",
+                    contentType: "application/json",
+                    bytes: manifestJSON)
+        for (i, kf) in payload.keyframes.enumerated() {
+            appendPart(name: "keyframes", filename: kf.meta.filename.isEmpty
+                                                     ? "frame_\(i).jpg"
+                                                     : kf.meta.filename,
+                        contentType: "image/jpeg",
+                        bytes: kf.jpeg)
+        }
+        appendPart(name: "scan_log", filename: "scan_log.json",
+                    contentType: "application/json",
+                    bytes: payload.scanLogJSON)
+
+        data.append("--\(boundary)--\r\n")
+        return data
+    }
 }
 
 // MARK: - Data Extension for Multipart
