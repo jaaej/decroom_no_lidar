@@ -507,6 +507,60 @@ async def upload_room(
     return JSONResponse(content=result)
 
 
+@app.post("/api/upload/phone-first")
+async def upload_phone_first(
+    room_geometry: UploadFile = File(...),
+    point_cloud: UploadFile = File(...),
+    keyframes_manifest: UploadFile = File(...),
+    keyframes: List[UploadFile] = File(...),
+    scan_log: UploadFile = File(...),
+):
+    """Receive a phone-first upload: walls + PLY + keyframes + log.
+    Runs SpatialLM on the phone PLY and returns a RoomPayload."""
+    room_id = str(uuid.uuid4())[:8]
+    run_started_at = time.time()
+    logger.info("Phone-first upload received: room_id=%s, %d keyframes",
+                room_id, len(keyframes))
+
+    try:
+        from pipeline.phone_first_pipeline import (
+            PhoneFirstSchemaError,
+            parse_payload,
+            run_phone_first_pipeline,
+        )
+
+        room_geom_bytes = await room_geometry.read()
+        ply_bytes = await point_cloud.read()
+        manifest_bytes = await keyframes_manifest.read()
+        keyframe_bytes = [await kf.read() for kf in keyframes]
+        log_bytes = await scan_log.read() if scan_log is not None else b""
+
+        try:
+            payload = parse_payload(
+                room_geom_bytes, ply_bytes, manifest_bytes,
+                keyframe_bytes, log_bytes,
+            )
+        except PhoneFirstSchemaError as e:
+            logger.warning("Phone-first payload rejected: %s", e)
+            return JSONResponse(
+                status_code=400,
+                content={"error": "schema_error", "detail": str(e)},
+            )
+
+        result = await run_in_threadpool(
+            run_phone_first_pipeline, payload, cfg
+        )
+    except Exception as e:
+        logger.exception("Phone-first pipeline failed")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "pipeline_failure", "detail": str(e)},
+        )
+
+    _archive_debug_artifacts(room_id, result, None, run_started_at)
+    return JSONResponse(content=result)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
