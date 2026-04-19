@@ -422,6 +422,9 @@ Every commit is buildable and testable. No broken-in-between states.
 
 **Open question**: Should `scan_log.json` include raw Depth Runner statistics (avg inference time, thermal events) by default? Current `ScanLogger` schema from Plan 1 supports it but not all fields are populated. Keeping defaults as-is in 3a; expand in 3b if a pattern emerges.
 
+**Open question — scan guidance UX**: The phone-first architecture needs good ARKit data (plane anchors, feature tracking), which in turn requires users to do more than just rotate in place — ideally slow rotation with a small step for parallax, occasional pitch up/down for floor/ceiling plane anchors, and decent lighting. Apple's ARKit guidance recommends these explicitly. The current `VideoRecorderView` guidance text only says "Slowly rotate to scan the room" and warns "Slow down" on tracking loss; it does not mention tilting, parallax motion, lighting, or surface texture.
+*Current answer*: Ship 3a with existing guidance. The new `ScanError` taxonomy (`.noWallsDetected`, `.insufficientCoverage`) surfaces specific failures with actionable messages, which should steer users in the right direction for the most common errors. If post-3a manual QA or real user reports show testers consistently hitting these errors and not recovering, a dedicated scan-guidance polish plan will add better in-app instructions (tilt prompts, lighting warnings, visual icons). Not in 3a scope; revisit based on evidence.
+
 **Open question**: Semantic wall-snapping is deferred to 3b. Some beds/dressers will appear detached from walls in 3a. Acceptable as MVP, might surface in QA as "furniture floating in the room." Worth noting so expectations are calibrated.
 
 ## Dependencies
