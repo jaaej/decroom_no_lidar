@@ -736,6 +736,83 @@ final class GuidedARFrameRecorder: ObservableObject {
         return (jpegPaths: keyframeJPEGPaths, metadataJSON: metadataJSON)
     }
 
+    /// Build and return the phone-first upload payload. Must be called after
+    /// stopVideoMode() (so keyframeJPEGPaths are finalized). On any phone-side
+    /// validation failure, throws a ScanError.
+    @MainActor
+    func finalizePhoneFirstPayload() async throws -> ScanUploadPayload {
+        guard let session = scanSession else {
+            throw ScanError.payloadBuildFailed(
+                detail: "ScanSession missing — start() was never called?"
+            )
+        }
+
+        // keyframeJPEGPaths and shots are appended pairwise in video-mode
+        // capture; they are index-aligned. Read JPEG data from disk and build
+        // KeyframeMetadata from the matching shot.
+        var jpegs: [Data] = []
+        var metas: [ScanUploadPayload.KeyframeMetadata] = []
+
+        for (i, url) in keyframeJPEGPaths.enumerated() {
+            let data: Data
+            do {
+                data = try Data(contentsOf: url)
+            } catch {
+                throw ScanError.payloadBuildFailed(
+                    detail: "read keyframe \(url.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+
+            // Prefer the matching shot; fall back to iPhone 15 Pro portrait defaults
+            // if indexing doesn't line up (can happen in edge cases where some shots
+            // are photo-mode-only with no JPEG).
+            let shot: GuidedShotPayload? = (i < shots.count) ? shots[i] : nil
+            let intr: Intrinsics
+            let pose: simd_float4x4
+            let timestamp: Double
+
+            if let shot = shot {
+                intr = Intrinsics(
+                    fx: shot.intrinsics.fx,
+                    fy: shot.intrinsics.fy,
+                    cx: shot.intrinsics.cx,
+                    cy: shot.intrinsics.cy,
+                    width: shot.intrinsics.width,
+                    height: shot.intrinsics.height
+                )
+                pose = matrixFromRowMajor(shot.pose.matrix)
+                timestamp = shot.timestamp
+            } else {
+                intr = Intrinsics(fx: 1500, fy: 1500, cx: 720, cy: 960,
+                                   width: 1440, height: 1920)
+                pose = matrix_identity_float4x4
+                timestamp = 0
+            }
+
+            jpegs.append(data)
+            metas.append(ScanUploadPayload.KeyframeMetadata(
+                filename: "frame_\(String(format: "%02d", i)).jpg",
+                timestamp: timestamp,
+                poseWorldFromCamera: pose,
+                intrinsics: intr
+            ))
+        }
+
+        return try session.finalize(keyframes: metas, keyframeJPEGs: jpegs)
+    }
+
+    /// Reconstruct a simd_float4x4 from a row-major 16-float array.
+    /// Matches GuidedShotPayload.pose.matrix format produced by toRowMajorArray().
+    private func matrixFromRowMajor(_ m: [Float]) -> simd_float4x4 {
+        guard m.count == 16 else { return matrix_identity_float4x4 }
+        return simd_float4x4(
+            SIMD4<Float>(m[0],  m[4],  m[8],  m[12]),
+            SIMD4<Float>(m[1],  m[5],  m[9],  m[13]),
+            SIMD4<Float>(m[2],  m[6],  m[10], m[14]),
+            SIMD4<Float>(m[3],  m[7],  m[11], m[15])
+        )
+    }
+
     /// Remove keyframe JPEG files from temp directory to prevent disk/privacy leaks.
     func cleanupKeyframeFiles() {
         for url in keyframeJPEGPaths {

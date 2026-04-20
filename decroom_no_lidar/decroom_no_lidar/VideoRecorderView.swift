@@ -413,13 +413,19 @@ struct VideoRecorderView: View {
 
     private func upload() {
         guard recorder.capturedCount > 0 else { return }
-        let result = recorder.stopVideoMode()
-        guard !result.jpegPaths.isEmpty else {
-            processor.state = .failed("No keyframe files found on disk.")
-            return
+        // Preserve disk-based keyframe paths (used inside finalizePhoneFirstPayload).
+        _ = recorder.stopVideoMode()
+        Task {
+            do {
+                let payload = try await recorder.finalizePhoneFirstPayload()
+                print("[VideoRecorderView] Uploading phone-first payload scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
+                processor.processPhoneFirstPayload(payload)
+            } catch let e as ScanError {
+                processor.state = .failed(e.message)
+            } catch {
+                processor.state = .failed("Scan finalization failed: \(error.localizedDescription)")
+            }
         }
-        print("[VideoRecorderView] Uploading \(result.jpegPaths.count) keyframes")
-        processor.processKeyframesFromDisk(result.jpegPaths, metadataJSON: result.metadataJSON)
     }
 }
 

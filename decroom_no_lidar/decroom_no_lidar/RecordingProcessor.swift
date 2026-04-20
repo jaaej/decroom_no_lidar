@@ -82,6 +82,24 @@ final class RecordingProcessor: ObservableObject {
         }
     }
 
+    /// Upload a phone-first payload. Publishes `.uploading` then either
+    /// `.finished(RoomPayload)` or `.failed(String)` with the specific
+    /// ScanError message (preserves "no fallback, errors explain what
+    /// happened").
+    func processPhoneFirstPayload(_ payload: ScanUploadPayload) {
+        state = .uploading
+        Task {
+            do {
+                let roomPayload = try await UploadService.uploadPhoneFirst(payload)
+                self.state = .finished(roomPayload)
+            } catch let e as ScanError {
+                self.state = .failed(e.message)
+            } catch {
+                self.state = .failed("Unexpected upload error: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func reset() {
         state = .idle
     }
