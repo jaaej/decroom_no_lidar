@@ -158,6 +158,7 @@ struct VideoRecorderView: View {
     @ObservedObject var processor: RecordingProcessor
     @State private var isScanning = false
     @State private var showSpeedWarning = false
+    @State private var activeError: ScanError? = nil
 
     private var coveragePercent: Int {
         let filled = coverage.filledYawBins.count
@@ -329,6 +330,47 @@ struct VideoRecorderView: View {
                 }
             }
         }
+        .onChange(of: processor.state) { _, newState in
+            if case .failed(let msg) = newState {
+                activeError = Self.errorForMessage(msg)
+            }
+        }
+        .alert(
+            isPresented: Binding(
+                get: { activeError != nil },
+                set: { if !$0 { activeError = nil } }
+            )
+        ) {
+            guard let err = activeError else {
+                return Alert(title: Text("Error"))
+            }
+            if err.isRetryable {
+                let retryLabel: String
+                switch err {
+                case .noWallsDetected, .insufficientCoverage:
+                    retryLabel = "Resume Scan"
+                default:
+                    retryLabel = "Retry"
+                }
+                return Alert(
+                    title: Text("Scan Error"),
+                    message: Text(err.message),
+                    primaryButton: .default(Text(retryLabel)) {
+                        activeError = nil
+                        handleRetry(for: err)
+                    },
+                    secondaryButton: .cancel()
+                )
+            } else {
+                return Alert(
+                    title: Text("Scan Error"),
+                    message: Text(err.message),
+                    dismissButton: .default(Text("OK")) {
+                        activeError = nil
+                    }
+                )
+            }
+        }
         .onAppear {
             coverage.captureMode = .video
             coverage.reset()
@@ -411,6 +453,40 @@ struct VideoRecorderView: View {
         isScanning = false
     }
 
+    /// Reverse-lookup a ScanError from its user-facing message.
+    /// Used when processor.state = .failed(msg) needs an alert that matches
+    /// the retryable-vs-not treatment. Fallback: backendServerError.
+    static func errorForMessage(_ msg: String) -> ScanError {
+        let table: [ScanError] = [
+            .unsupportedDevice,
+            .depthModelLoadFailed(detail: ""),
+            .arKitTrackingLimited,
+            .arKitSessionFailed(detail: ""),
+            .noWallsDetected,
+            .insufficientCoverage(binsFilled: 0, binsRequired: 12),
+            .payloadBuildFailed(detail: ""),
+            .uploadNoServer,
+            .uploadTimeout,
+            .backendServerError(status: 0, detail: ""),
+            .noFurnitureDetected,
+        ]
+        return table.first(where: { $0.message == msg })
+            ?? .backendServerError(status: 0, detail: msg)
+    }
+
+    private func handleRetry(for error: ScanError) {
+        switch error {
+        case .noWallsDetected, .insufficientCoverage:
+            // Resume scan — keep recorder state, user keeps rotating.
+            isScanning = true
+            recorder.start()
+        case .uploadNoServer, .uploadTimeout, .payloadBuildFailed, .backendServerError:
+            upload()
+        default:
+            break  // non-retryable cases dismiss with OK
+        }
+    }
+
     private func upload() {
         guard recorder.capturedCount > 0 else { return }
         // Preserve disk-based keyframe paths (used inside finalizePhoneFirstPayload).
@@ -421,6 +497,7 @@ struct VideoRecorderView: View {
                 print("[VideoRecorderView] Uploading phone-first payload scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
                 processor.processPhoneFirstPayload(payload)
             } catch let e as ScanError {
+                activeError = e
                 processor.state = .failed(e.message)
             } catch {
                 processor.state = .failed("Scan finalization failed: \(error.localizedDescription)")
