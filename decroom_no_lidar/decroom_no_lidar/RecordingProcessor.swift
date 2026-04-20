@@ -38,50 +38,6 @@ final class RecordingProcessor: ObservableObject {
 
     @Published var state: ProcessingState = .idle
 
-    /// Upload from disk-based JPEG paths (video mode) — no CGImages held in memory.
-    func processKeyframesFromDisk(_ jpegPaths: [URL], metadataJSON: String?) {
-        guard !jpegPaths.isEmpty else {
-            state = .failed("No keyframes captured.")
-            return
-        }
-        state = .uploading
-
-        Task {
-            do {
-                let payload = try await UploadService.uploadFromDisk(
-                    jpegPaths: jpegPaths,
-                    metadataJSON: metadataJSON
-                )
-                self.state = .finished(payload)
-            } catch {
-                self.state = .failed(error.localizedDescription)
-            }
-        }
-    }
-
-    func processCapturedFrames(_ frames: [CGImage], metadataJSON: String?) {
-        guard !frames.isEmpty else {
-            state = .failed("No frames captured.")
-            return
-        }
-        state = .uploading
-
-        // Use Task {} (not Task.detached) so state updates stay on @MainActor.
-        // The heavy work (JPEG encoding, network I/O) happens inside
-        // UploadService.upload() via its own Task.detached.
-        Task {
-            do {
-                let payload = try await UploadService.upload(
-                    images: frames,
-                    metadataJSON: metadataJSON
-                )
-                self.state = .finished(payload)
-            } catch {
-                self.state = .failed(error.localizedDescription)
-            }
-        }
-    }
-
     /// Upload a phone-first payload. Publishes `.uploading` then either
     /// `.finished(RoomPayload)` or `.failed(String)` with the specific
     /// ScanError message (preserves "no fallback, errors explain what

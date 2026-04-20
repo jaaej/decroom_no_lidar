@@ -93,8 +93,8 @@ struct GuidedCaptureView: View {
                         .disabled(!coverage.canCapture() || isCapturing)
 
                         Button("Upload Now") {
-                            let result = recorder.stop()
-                            processor.processCapturedFrames(result.frames, metadataJSON: result.metadataJSON)
+                            // TODO(Plan 3b): photo-mode upload not wired for phone-first; remove the tab or implement.
+                            _ = recorder.stop()
                         }
                         .buttonStyle(.bordered)
                         .disabled(!coverage.isReadyToUpload)
