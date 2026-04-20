@@ -30,8 +30,30 @@ try:
 except ImportError:
     np = None
 
-from .depth import _load_image
 from .metadata import ShotMetadata
+
+
+def _load_image(frame):
+    """Load image from FastAPI UploadFile or file path. Inlined from removed depth.py."""
+    try:
+        import cv2
+
+        if hasattr(frame, "file"):
+            data = frame.file.read()
+            frame.file.seek(0)
+            arr = np.frombuffer(data, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return img
+        elif isinstance(frame, (str, Path)):
+            img = cv2.imread(str(frame))
+            if img is not None:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return img
+    except ImportError:
+        pass
+    return None
 
 # ── Category mapping: SpatialLM 59 categories → Decroom 14 categories ──
 
