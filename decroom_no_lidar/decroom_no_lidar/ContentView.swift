@@ -628,10 +628,6 @@ final class GuidedARFrameRecorder: ObservableObject {
     /// Callback invoked on main thread when a keyframe is accepted in video mode
     var onKeyframeCaptured: ((CaptureData) -> Void)?
 
-    /// Downsampled keyframe thumbnails for panoramic mosaic display (video mode only).
-    /// Each entry is ~480KB (300×400×4), so 100 keyframes ≈ 48MB — acceptable.
-    @Published private(set) var keyframeThumbnails: [(image: CGImage, yaw: Float)] = []
-
     // AR scene feedback
     weak var arView: ARView?
     private var markerRootAnchor: AnchorEntity?
@@ -699,7 +695,6 @@ final class GuidedARFrameRecorder: ObservableObject {
         lastKeyframeTime = 0
         videoFrameCount = 0
         keyframeJPEGPaths = []
-        keyframeThumbnails = []
         scanStartTime = 0
 
         if isVideoMode {
@@ -1536,24 +1531,7 @@ final class GuidedARFrameRecorder: ObservableObject {
                 )
             )
 
-            // Generate panorama thumbnail for video mode (off main thread)
-            var thumbnail: CGImage?
-            if isVideoModeCapture {
-                let thumbW = 300
-                let thumbH = 400
-                if let ctx = CGContext(
-                    data: nil, width: thumbW, height: thumbH,
-                    bitsPerComponent: 8, bytesPerRow: thumbW * 4,
-                    space: CGColorSpaceCreateDeviceRGB(),
-                    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-                ) {
-                    ctx.interpolationQuality = .medium
-                    ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: thumbW, height: thumbH))
-                    thumbnail = ctx.makeImage()
-                }
-            }
-
-            await MainActor.run { [cgImage, shot, thumbnail] in
+            await MainActor.run { [cgImage, shot] in
                 // Store JPEG path for disk-based upload
                 self.keyframeJPEGPaths.append(fileURL)
                 // Also keep shot metadata for upload
@@ -1561,10 +1539,6 @@ final class GuidedARFrameRecorder: ObservableObject {
                 // Only keep CGImage in memory for photo mode; video mode reads from disk
                 if !self.isVideoMode {
                     self.frames.append(cgImage)
-                }
-                // Store thumbnail for panoramic mosaic (video mode)
-                if let thumb = thumbnail {
-                    self.keyframeThumbnails.append((image: thumb, yaw: captureYaw))
                 }
                 self.capturedCount = self.isVideoMode ? self.keyframeJPEGPaths.count : self.frames.count
                 self.lastCapturePosition = cameraPosition

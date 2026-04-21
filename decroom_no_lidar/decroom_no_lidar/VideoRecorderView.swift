@@ -12,118 +12,6 @@
 import SwiftUI
 import ARKit
 
-// MARK: - Panoramic Mosaic View
-
-/// Renders keyframe thumbnails arranged by yaw angle as a cylindrical panorama.
-/// The live camera feed shows through a transparent center window.
-/// Dark areas = uncaptured directions.
-struct PanoramaMosaicView: View {
-    let thumbnails: [(image: CGImage, yaw: Float)]
-    let currentYaw: Float
-    let isScanning: Bool
-
-    // Camera horizontal FOV in radians (~60° for iPhone wide lens)
-    private let cameraFOV: Float = 1.05  // ~60°
-
-    var body: some View {
-        Canvas { context, size in
-            let w = size.width
-            let h = size.height
-
-            // 1. Fill entire screen black (uncaptured areas)
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black.opacity(0.85)))
-
-            // 2. Pixels per radian — how wide one radian of yaw maps to on screen
-            let pixelsPerRadian = w / CGFloat(cameraFOV)
-
-            // 3. Draw keyframe thumbnails at their angular positions
-            let thumbWidth = w * 0.72   // slightly wider than center window for overlap
-            let thumbHeight = h * 0.78
-            let thumbY = h * 0.08
-
-            for thumb in thumbnails {
-                let relAngle = Self.normalizeAngle(thumb.yaw - currentYaw)
-
-                // Skip thumbnails far behind the camera
-                if abs(relAngle) > 2.8 { continue }
-
-                let centerX = w / 2 + CGFloat(relAngle) * pixelsPerRadian
-
-                let drawRect = CGRect(
-                    x: centerX - thumbWidth / 2,
-                    y: thumbY,
-                    width: thumbWidth,
-                    height: thumbHeight
-                )
-
-                // Only draw if at least partially on screen
-                guard drawRect.maxX > 0 && drawRect.minX < w else { continue }
-
-                // Draw the thumbnail with slight opacity fade at edges
-                let edgeFade = min(1.0, Double(2.0 - abs(relAngle)))
-                context.opacity = edgeFade
-                context.draw(
-                    Image(decorative: thumb.image, scale: 1),
-                    in: drawRect
-                )
-                context.opacity = 1.0
-            }
-
-            // 4. Cut out center window for live camera feed
-            // Rounded rectangle in the center — the ARView shows through here
-            let centerW = w * 0.68
-            let centerH = h * 0.72
-            let centerRect = CGRect(
-                x: (w - centerW) / 2,
-                y: (h - centerH) / 2,
-                width: centerW,
-                height: centerH
-            )
-
-            // Clear the center to show AR camera behind
-            context.blendMode = .clear
-            let cornerRadius: CGFloat = 16
-            context.fill(
-                Path(roundedRect: centerRect, cornerRadius: cornerRadius),
-                with: .color(.white)
-            )
-            context.blendMode = .normal
-
-            // 5. Draw thin border around center window
-            context.stroke(
-                Path(roundedRect: centerRect, cornerRadius: cornerRadius),
-                with: .color(.white.opacity(0.4)),
-                lineWidth: 1.5
-            )
-
-            // 6. Draw subtle grid lines on dark areas to show "empty space"
-            let gridSpacing: CGFloat = 40
-            context.blendMode = .normal
-            for x in stride(from: CGFloat(0), to: w, by: gridSpacing) {
-                var line = Path()
-                line.move(to: CGPoint(x: x, y: 0))
-                line.addLine(to: CGPoint(x: x, y: h))
-                context.stroke(line, with: .color(.white.opacity(0.03)), lineWidth: 0.5)
-            }
-            for y in stride(from: CGFloat(0), to: h, by: gridSpacing) {
-                var line = Path()
-                line.move(to: CGPoint(x: 0, y: y))
-                line.addLine(to: CGPoint(x: w, y: y))
-                context.stroke(line, with: .color(.white.opacity(0.03)), lineWidth: 0.5)
-            }
-        }
-        .allowsHitTesting(false)
-        .compositingGroup()
-    }
-
-    static func normalizeAngle(_ a: Float) -> Float {
-        var v = a
-        while v > .pi { v -= 2 * .pi }
-        while v < -.pi { v += 2 * .pi }
-        return v
-    }
-}
-
 // MARK: - Coverage Arc
 
 /// Blue arc at the bottom showing which yaw directions have been captured.
@@ -167,21 +55,11 @@ struct VideoRecorderView: View {
 
     var body: some View {
         ZStack {
-            // LAYER 1: Live AR camera (shows through the center window)
+            // LAYER 1: Live AR camera — full-screen, no overlay
             GuidedARViewContainer(recorder: recorder)
                 .ignoresSafeArea()
 
-            // LAYER 2: Panoramic mosaic overlay
-            if isScanning || recorder.capturedCount > 0 {
-                PanoramaMosaicView(
-                    thumbnails: recorder.keyframeThumbnails,
-                    currentYaw: recorder.currentYaw,
-                    isScanning: isScanning
-                )
-                .ignoresSafeArea()
-            }
-
-            // LAYER 3: UI controls
+            // LAYER 2: UI controls
             VStack(spacing: 0) {
                 // Speed warning
                 if showSpeedWarning {
