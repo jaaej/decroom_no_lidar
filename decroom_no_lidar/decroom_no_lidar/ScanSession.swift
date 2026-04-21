@@ -21,7 +21,13 @@ final class ScanSession: ObservableObject {
     let logger: ScanLogger
     private(set) var depthRunner: DepthRunner?
     let geometryBuilder = RoomGeometryBuilder()
-    let pointCloud = PointCloudAccumulator(voxelSize: 0.02, maxPoints: 500_000)
+    /// pointCloud is accessed from the ML background queue (add/voxelize
+    /// during inference) AND the main actor (exportPLY at finalize). mlQueue
+    /// is serial and finalize uses mlQueue.sync for a drain, so concurrent
+    /// access is prevented structurally — hence nonisolated(unsafe).
+    nonisolated(unsafe) let pointCloud = PointCloudAccumulator(
+        voxelSize: 0.02, maxPoints: 500_000
+    )
 
     // Plan 2 components
     private(set) var yoloRunner: YoloRunner?
@@ -184,7 +190,11 @@ final class ScanSession: ObservableObject {
             throw ScanError.payloadBuildFailed(detail: error.localizedDescription)
         }
 
-        let plyData = pointCloud.exportPLY()
+        // Drain any in-flight depth inference + accumulation on mlQueue
+        // before exporting the PLY, so the exported bytes reflect the
+        // complete scan. mlQueue is serial; sync{} blocks until the last
+        // enqueued task (if any) finishes.
+        let plyData: Data = mlQueue.sync { pointCloud.exportPLY() }
 
         // Write log to disk (also keeps Plan 1's retention behavior).
         let logData: Data
@@ -223,7 +233,10 @@ final class ScanSession: ObservableObject {
         return atan2(fx, fz)
     }
 
-    /// Runs on mlQueue (background). Publishes results to main.
+    /// Runs on mlQueue (background serial). Accumulates the point cloud on
+    /// the same queue (off MainActor) and only hops to MainActor for the
+    /// small coverageProgress update. Heavy per-inference voxel work used to
+    /// run on MainActor and choke the UI; this keeps the main thread free.
     private nonisolated func runDepthBackground(
         capturedImage: CVPixelBuffer,
         intrinsics: Intrinsics,
@@ -250,18 +263,24 @@ final class ScanSession: ObservableObject {
             height: result.height
         )
 
+        // Accumulate on mlQueue (this thread) — pointCloud is nonisolated(unsafe)
+        // so Swift concurrency allows it. Serial access is guaranteed because
+        // mlQueue is serial and finalize() uses mlQueue.sync to drain.
+        // pixelStride 8 (was 4) = 4× less work per inference.
+        pointCloud.addDepthMap(
+            result.depths,
+            width: result.width,
+            height: result.height,
+            intrinsics: scaledIntrinsics,
+            worldFromCamera: pose,
+            colorAt: { _, _ in SIMD3<UInt8>(128, 128, 128) },
+            pixelStride: 8
+        )
+        let count = pointCloud.count
+
+        // Only the small coverage update hops to MainActor.
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.pointCloud.addDepthMap(
-                result.depths,
-                width: result.width,
-                height: result.height,
-                intrinsics: scaledIntrinsics,
-                worldFromCamera: pose,
-                colorAt: { _, _ in SIMD3<UInt8>(128, 128, 128) },
-                pixelStride: 4
-            )
-            self.coverageProgress = min(1.0, Double(self.pointCloud.count) / 50_000)
+            self?.coverageProgress = min(1.0, Double(count) / 50_000)
         }
     }
 
