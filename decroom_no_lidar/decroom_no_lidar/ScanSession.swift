@@ -49,10 +49,14 @@ final class ScanSession: ObservableObject {
     private let startTime = Date()
     private var frameIndex = 0
     private var lastDepthFrame = -1
-    private var lastYoloFrame = -1
-    private let depthFrameInterval = 6    // ~5fps at 30fps
-    private let yoloFrameInterval = 15    // ~2fps at 30fps
+    private let depthFrameInterval = 15   // ~2fps at 30fps (was 5fps — too heavy)
     private let totalYawBins = 24
+
+    // Drop-on-busy guard: if a prior depth inference is still running, skip
+    // this dispatch rather than queue. Without this, enqueues at a faster
+    // rate than inference completes retain ARKit capturedImage buffers until
+    // the pool is exhausted and ARKit pauses frame delivery (~10s freezes).
+    private var depthInFlight = false
 
     init() {
         self.logger = ScanLogger()
@@ -93,9 +97,13 @@ final class ScanSession: ObservableObject {
 
         guard modelsReady else { return }
 
-        // Dispatch depth inference to background (non-blocking)
-        if let depth = depthRunner, frameIndex - lastDepthFrame >= depthFrameInterval {
+        // Dispatch depth inference to background if not already busy. Dropping
+        // frames when in-flight prevents ARKit buffer-pool exhaustion.
+        if !depthInFlight,
+           let depth = depthRunner,
+           frameIndex - lastDepthFrame >= depthFrameInterval {
             lastDepthFrame = frameIndex
+            depthInFlight = true
             let capturedImage = frame.capturedImage
             let intrinsics = Intrinsics.make(from: frame.camera, portrait: true)
             let pose = frame.camera.transform
@@ -109,25 +117,15 @@ final class ScanSession: ObservableObject {
                     depth: depth,
                     frameIndex: fi
                 )
+                Task { @MainActor [weak self] in self?.depthInFlight = false }
             }
         }
 
-        // Dispatch YOLO inference to background (non-blocking)
-        if let yolo = yoloRunner, frameIndex - lastYoloFrame >= yoloFrameInterval {
-            lastYoloFrame = frameIndex
-            let capturedImage = frame.capturedImage
-            let cameraTransform = frame.camera.transform
-            let fi = frameIndex
-
-            mlQueue.async { [weak self] in
-                self?.runYoloBackground(
-                    capturedImage: capturedImage,
-                    cameraTransform: cameraTransform,
-                    yolo: yolo,
-                    frameIndex: fi
-                )
-            }
-        }
+        // YOLO inference is disabled in Plan 3a — its outputs
+        // (recentDetections, tracker observations) are not consumed by any
+        // live code path. Keeping it disabled avoids the extra ML pressure.
+        // Reenable in 3b when consensus logic lands. (runYoloBackground
+        // remains in the file and can be re-dispatched there.)
     }
 
     /// Update plane anchors — called from didAdd/didUpdate anchor delegate.

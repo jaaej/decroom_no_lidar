@@ -9,7 +9,6 @@ import SwiftUI
 
 enum ScanMode: String, CaseIterable {
     case video = "Video Scan"
-    case photo = "Photo Capture"
     case furniture = "Scan Furniture"
 }
 
@@ -76,8 +75,6 @@ struct CaptureFlowView: View {
                 switch scanMode {
                 case .video:
                     VideoRecorderView(processor: processor)
-                case .photo:
-                    ContentView(processor: processor)
                 case .furniture:
                     FurnitureScanView()
                 }
