@@ -404,11 +404,20 @@ def run_phone_first_pipeline(
     positions, _colors = load_ply_points(payload.point_cloud_ply)
     logger.info("PLY loaded: %d points", positions.shape[0])
 
+    # SpatialLM is optional in Plan 3a — if it fails (GPU tunnel down,
+    # model not loaded, network error, etc.), we still return the phone's
+    # walls as a valid RoomPayload with empty objects. The iOS app shows
+    # the ".noFurnitureDetected" info toast in that case, and the scan
+    # saves with walls-only. When SpatialLM is reachable again on a later
+    # scan, furniture detection resumes automatically.
+    slm_walls: List[Any] = []
+    slm_objects: List[Any] = []
     try:
         slm_walls, slm_objects = run_spatiallm_pipeline(points=positions, cfg=cfg)
     except Exception as e:
-        logger.exception("SpatialLM inference failed")
-        raise RuntimeError(f"spatiallm_failed: {e}") from e
+        logger.warning(
+            "SpatialLM inference unavailable — returning walls-only: %s", e
+        )
 
     check_wall_agreement(payload.room_geometry["walls"], slm_walls or [])
 
