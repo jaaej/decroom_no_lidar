@@ -33,7 +33,8 @@ final class RoomGeometryBuilder {
         let floorHeight = floorY(from: horizontals)
         let ceilingHeight = ceilingY(from: horizontals)
         let yaw = manhattanYaw(from: verticals)
-        let walls = wallSegments(from: verticals, yaw: yaw, floorY: floorHeight)
+        let rawWalls = wallSegments(from: verticals, yaw: yaw, floorY: floorHeight)
+        let walls = consolidate(rawWalls, yaw: yaw)
 
         return RoomGeometry(walls: walls,
                             floorHeight: floorHeight,
@@ -130,5 +131,164 @@ final class RoomGeometryBuilder {
         return WallSegment(start: SIMD2(start3D.x, start3D.z),
                            end: SIMD2(end3D.x, end3D.z),
                            height: plane.extent.y)
+    }
+
+    // MARK: - Consolidation
+
+    /// Turn raw ARKit plane-anchor segments into a clean room rectangle.
+    /// Steps:
+    ///   1. Rotate segments into the Manhattan frame, classify by dominant
+    ///      axis, and drop anything >~20° off both axes.
+    ///   2. Merge colinear fragments (group by perpendicular distance within
+    ///      `mergeTolerance` and span min–max).
+    ///   3. If we have ≥2 horizontal or ≥2 vertical walls (with at least one
+    ///      of each), keep the outer-most on each side and extend endpoints
+    ///      to close a rectangle. Otherwise return the merged set as-is
+    ///      (partial scan — don't fabricate walls).
+    ///   4. Rotate back into world space and emit `WallSegment`s.
+    private func consolidate(
+        _ raw: [WallSegment],
+        yaw: Float,
+        mergeTolerance: Float = 0.3,      // meters
+        manhattanTolerance: Float = 0.35  // |sin(angle-off-axis)|
+    ) -> [WallSegment] {
+        guard !raw.isEmpty else { return [] }
+
+        let cosY = cos(-yaw)
+        let sinY = sin(-yaw)
+        func rotateInto(_ p: SIMD2<Float>) -> SIMD2<Float> {
+            SIMD2(p.x * cosY - p.y * sinY,
+                  p.x * sinY + p.y * cosY)
+        }
+        let cosYInv = cos(yaw)
+        let sinYInv = sin(yaw)
+        func rotateBack(_ p: SIMD2<Float>) -> SIMD2<Float> {
+            SIMD2(p.x * cosYInv - p.y * sinYInv,
+                  p.x * sinYInv + p.y * cosYInv)
+        }
+
+        struct Segment {
+            var startLocal: SIMD2<Float>
+            var endLocal: SIMD2<Float>
+            var height: Float
+            var isHorizontal: Bool
+            var perpPos: Float    // Z for horizontal, X for vertical
+            var spanMin: Float    // min X for horizontal, min Z for vertical
+            var spanMax: Float    // max X for horizontal, max Z for vertical
+        }
+
+        // `finalize` declared before any early-return so every branch sees it.
+        func finalize(_ s: Segment) -> WallSegment {
+            let sw = rotateBack(s.startLocal)
+            let ew = rotateBack(s.endLocal)
+            return WallSegment(start: sw, end: ew,
+                               height: s.height > 0 ? s.height : 2.5)
+        }
+
+        // 1. Rotate + classify + filter out mis-oriented segments.
+        var segs: [Segment] = []
+        for w in raw {
+            let s = rotateInto(w.start)
+            let e = rotateInto(w.end)
+            let d = e - s
+            let length = simd_length(d)
+            guard length > 0.001 else { continue }
+            let dir = d / length
+            // |sin(angleOffX)| = |dir.y| ; |sin(angleOffZ)| = |dir.x|.
+            // Keep only if close to at least one Manhattan axis.
+            let minOff = min(abs(dir.y), abs(dir.x))
+            guard minOff < manhattanTolerance else { continue }
+
+            let isHorizontal = abs(dir.x) >= abs(dir.y)
+            if isHorizontal {
+                segs.append(Segment(
+                    startLocal: s, endLocal: e, height: w.height,
+                    isHorizontal: true,
+                    perpPos: (s.y + e.y) / 2,
+                    spanMin: min(s.x, e.x),
+                    spanMax: max(s.x, e.x)
+                ))
+            } else {
+                segs.append(Segment(
+                    startLocal: s, endLocal: e, height: w.height,
+                    isHorizontal: false,
+                    perpPos: (s.x + e.x) / 2,
+                    spanMin: min(s.y, e.y),
+                    spanMax: max(s.y, e.y)
+                ))
+            }
+        }
+
+        guard !segs.isEmpty else { return [] }
+
+        // 2. Merge colinear segments by perpPos proximity.
+        func mergeColinear(_ group: [Segment]) -> [Segment] {
+            var sorted = group.sorted { $0.perpPos < $1.perpPos }
+            var merged: [Segment] = []
+            while !sorted.isEmpty {
+                var cluster: [Segment] = [sorted.removeFirst()]
+                while let next = sorted.first,
+                      abs(next.perpPos - cluster[0].perpPos) < mergeTolerance {
+                    cluster.append(sorted.removeFirst())
+                }
+                let avgPos = cluster.map { $0.perpPos }.reduce(0, +) / Float(cluster.count)
+                let spanMin = cluster.map { $0.spanMin }.min()!
+                let spanMax = cluster.map { $0.spanMax }.max()!
+                let avgHeight = cluster.map { $0.height }.reduce(0, +) / Float(cluster.count)
+                let proto = cluster[0]
+                merged.append(Segment(
+                    startLocal: proto.isHorizontal
+                        ? SIMD2(spanMin, avgPos) : SIMD2(avgPos, spanMin),
+                    endLocal: proto.isHorizontal
+                        ? SIMD2(spanMax, avgPos) : SIMD2(avgPos, spanMax),
+                    height: avgHeight,
+                    isHorizontal: proto.isHorizontal,
+                    perpPos: avgPos,
+                    spanMin: spanMin,
+                    spanMax: spanMax
+                ))
+            }
+            return merged
+        }
+
+        let horizontals = mergeColinear(segs.filter { $0.isHorizontal })
+        let verticals = mergeColinear(segs.filter { !$0.isHorizontal })
+
+        // 3. Need both axes represented AND at least one axis with ≥2 walls
+        //    to form a rectangle. Otherwise return merged walls as-is.
+        guard !horizontals.isEmpty, !verticals.isEmpty,
+              horizontals.count >= 2 || verticals.count >= 2 else {
+            return (horizontals + verticals).map { finalize($0) }
+        }
+
+        let minZWall = horizontals.min(by: { $0.perpPos < $1.perpPos })!
+        let maxZWall = horizontals.max(by: { $0.perpPos < $1.perpPos })!
+        let minXWall = verticals.min(by: { $0.perpPos < $1.perpPos })!
+        let maxXWall = verticals.max(by: { $0.perpPos < $1.perpPos })!
+
+        let minX = minXWall.perpPos
+        let maxX = maxXWall.perpPos
+        let minZ = minZWall.perpPos
+        let maxZ = maxZWall.perpPos
+        let avgHeight = (minZWall.height + maxZWall.height + minXWall.height + maxXWall.height) / 4
+        let height = avgHeight > 0 ? avgHeight : 2.5
+
+        // 4. Build 4 walls sharing the rectangle corners.
+        let rect: [Segment] = [
+            Segment(startLocal: SIMD2(minX, minZ), endLocal: SIMD2(maxX, minZ),
+                    height: height, isHorizontal: true, perpPos: minZ,
+                    spanMin: minX, spanMax: maxX),
+            Segment(startLocal: SIMD2(minX, maxZ), endLocal: SIMD2(maxX, maxZ),
+                    height: height, isHorizontal: true, perpPos: maxZ,
+                    spanMin: minX, spanMax: maxX),
+            Segment(startLocal: SIMD2(minX, minZ), endLocal: SIMD2(minX, maxZ),
+                    height: height, isHorizontal: false, perpPos: minX,
+                    spanMin: minZ, spanMax: maxZ),
+            Segment(startLocal: SIMD2(maxX, minZ), endLocal: SIMD2(maxX, maxZ),
+                    height: height, isHorizontal: false, perpPos: maxX,
+                    spanMin: minZ, spanMax: maxZ),
+        ]
+
+        return rect.map { finalize($0) }
     }
 }
