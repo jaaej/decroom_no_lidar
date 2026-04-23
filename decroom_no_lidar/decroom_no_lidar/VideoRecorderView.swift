@@ -47,6 +47,9 @@ struct VideoRecorderView: View {
     @State private var isScanning = false
     @State private var showSpeedWarning = false
     @State private var activeError: ScanError? = nil
+    @State private var scanStartTime: Date? = nil
+    @State private var showNoWallsWarning = false
+    @State private var lastUploadedPayload: ScanUploadPayload? = nil
 
     private var coveragePercent: Int {
         let filled = coverage.filledYawBins.count
@@ -66,6 +69,22 @@ struct VideoRecorderView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                         Text("Slow down")
+                    }
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.orange)
+                    .clipShape(Capsule())
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                // No-walls warning
+                if showNoWallsWarning {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text("No walls detected — look at wall edges, slow down")
                     }
                     .font(.subheadline.bold())
                     .foregroundStyle(.white)
@@ -125,6 +144,22 @@ struct VideoRecorderView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.white.opacity(0.15))
+
+                            if ScanUploadPayload.hasPersistedCapture {
+                                Button {
+                                    useLastCapture()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.up.doc")
+                                            .font(.caption)
+                                        Text("Use Last Capture").fontWeight(.semibold)
+                                    }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.white)
+                            }
 
                         } else if isScanning {
                             Button {
@@ -212,6 +247,13 @@ struct VideoRecorderView: View {
             if case .failed(let msg) = newState {
                 activeError = Self.errorForMessage(msg)
             }
+            // Persist the last successful upload for "Use Last Capture"
+            // (QA convenience). Only saves on .finished — errors and idle
+            // states don't overwrite.
+            if case .finished = newState,
+               let payload = lastUploadedPayload {
+                payload.saveAsLastCapture()
+            }
         }
         .alert(
             isPresented: Binding(
@@ -281,6 +323,24 @@ struct VideoRecorderView: View {
                     showSpeedWarning = isLimited
                 }
             }
+
+            // Show "no walls" warning if ARKit hasn't committed any vertical
+            // plane anchors after 15s of active scanning. Helps the user
+            // catch a failing scan before tapping Done.
+            if isScanning, let scanStart = scanStartTime {
+                let elapsed = Date().timeIntervalSince(scanStart)
+                let walls = recorder.scanSession?.geometry.walls.count ?? 0
+                let shouldShow = elapsed > 15 && walls == 0
+                if shouldShow != showNoWallsWarning {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showNoWallsWarning = shouldShow
+                    }
+                }
+            } else if showNoWallsWarning {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showNoWallsWarning = false
+                }
+            }
         }
     }
 
@@ -322,13 +382,19 @@ struct VideoRecorderView: View {
         coverage.captureMode = .video
         if recorder.capturedCount == 0 {
             coverage.reset()
+            recorder.start()
+        } else {
+            // User tapped "More" to add more frames to an existing scan —
+            // preserve what's already been captured.
+            recorder.resume()
         }
-        recorder.start()
         isScanning = true
+        scanStartTime = Date()
     }
 
     private func stopScan() {
         isScanning = false
+        scanStartTime = nil
     }
 
     /// Reverse-lookup a ScanError from its user-facing message.
@@ -355,9 +421,10 @@ struct VideoRecorderView: View {
     private func handleRetry(for error: ScanError) {
         switch error {
         case .noWallsDetected, .insufficientCoverage:
-            // Resume scan — keep recorder state, user keeps rotating.
+            // Resume scan — keep previously captured frames, just continue.
             isScanning = true
-            recorder.start()
+            recorder.resume()
+            scanStartTime = Date()
         case .uploadNoServer, .uploadTimeout, .payloadBuildFailed, .backendServerError:
             upload()
         default:
@@ -372,6 +439,7 @@ struct VideoRecorderView: View {
         Task {
             do {
                 let payload = try await recorder.finalizePhoneFirstPayload()
+                lastUploadedPayload = payload
                 print("[VideoRecorderView] Uploading phone-first payload scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
                 processor.processPhoneFirstPayload(payload)
             } catch let e as ScanError {
@@ -381,6 +449,15 @@ struct VideoRecorderView: View {
                 processor.state = .failed("Scan finalization failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func useLastCapture() {
+        guard let payload = ScanUploadPayload.loadLastCapture() else {
+            processor.state = .failed("Couldn't load the previous capture.")
+            return
+        }
+        print("[VideoRecorderView] Re-uploading last capture scan=\(payload.scanID)")
+        processor.processPhoneFirstPayload(payload)
     }
 }
 

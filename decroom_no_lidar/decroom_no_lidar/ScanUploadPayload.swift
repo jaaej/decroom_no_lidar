@@ -109,4 +109,146 @@ struct ScanUploadPayload {
         encoder.outputFormatting = [.prettyPrinted]
         return try encoder.encode(manifest)
     }
+
+    // MARK: - Persist to disk (QA convenience)
+
+    /// Directory used to persist a single most-recent scan payload.
+    /// Present only when a prior scan succeeded.
+    static var lastCaptureDirectory: URL {
+        let docs = FileManager.default.urls(
+            for: .documentDirectory, in: .userDomainMask
+        ).first!
+        return docs.appendingPathComponent("last_payload")
+    }
+
+    /// True if a saved payload exists on disk (i.e., a previous scan
+    /// completed successfully and was persisted).
+    static var hasPersistedCapture: Bool {
+        FileManager.default.fileExists(
+            atPath: lastCaptureDirectory.path
+        )
+    }
+
+    /// Persist this payload to disk. Overwrites any prior saved payload.
+    /// Fires and forgets — errors are logged but not surfaced, because
+    /// this is a QA convenience, not a user-facing feature.
+    func saveAsLastCapture() {
+        let dir = Self.lastCaptureDirectory
+        do {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: dir.path) {
+                try fm.removeItem(at: dir)
+            }
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try roomGeometryJSON.write(
+                to: dir.appendingPathComponent("room_geometry.json"))
+            try pointCloudPLY.write(
+                to: dir.appendingPathComponent("point_cloud.ply"))
+            try scanLogJSON.write(
+                to: dir.appendingPathComponent("scan_log.json"))
+            // keyframes.json manifest rebuilt from the metas + ID
+            let manifestData = try Self.encodeKeyframesManifest(
+                keyframes.map { $0.meta }
+            )
+            try manifestData.write(
+                to: dir.appendingPathComponent("keyframes.json"))
+            for (i, kf) in keyframes.enumerated() {
+                let filename = kf.meta.filename.isEmpty
+                    ? "frame_\(String(format: "%02d", i)).jpg"
+                    : kf.meta.filename
+                try kf.jpeg.write(to: dir.appendingPathComponent(filename))
+            }
+            // scanID + deviceInfo blob
+            let sidebar: [String: String] = [
+                "scan_id": scanID,
+                "device_model": deviceInfo.model,
+                "device_ios": deviceInfo.ios,
+                "device_chip": deviceInfo.chip,
+                "device_tier": deviceInfo.tier.rawValue,
+            ]
+            let sidebarData = try JSONEncoder().encode(sidebar)
+            try sidebarData.write(
+                to: dir.appendingPathComponent("sidebar.json"))
+            print("[ScanUploadPayload] persisted last capture → \(dir.path)")
+        } catch {
+            print("[ScanUploadPayload] save failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Load the most recent persisted payload from disk.
+    /// Returns nil if the directory doesn't exist or is malformed.
+    static func loadLastCapture() -> ScanUploadPayload? {
+        let dir = lastCaptureDirectory
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dir.path) else { return nil }
+
+        do {
+            let roomGeometryJSON = try Data(
+                contentsOf: dir.appendingPathComponent("room_geometry.json"))
+            let pointCloudPLY = try Data(
+                contentsOf: dir.appendingPathComponent("point_cloud.ply"))
+            let scanLogJSON = try Data(
+                contentsOf: dir.appendingPathComponent("scan_log.json"))
+            let manifestData = try Data(
+                contentsOf: dir.appendingPathComponent("keyframes.json"))
+            let sidebarData = try Data(
+                contentsOf: dir.appendingPathComponent("sidebar.json"))
+
+            let manifest = try JSONDecoder().decode(
+                KeyframesManifest.self, from: manifestData)
+            let sidebar = try JSONDecoder().decode(
+                [String: String].self, from: sidebarData)
+
+            var keyframes: [(jpeg: Data, meta: KeyframeMetadata)] = []
+            for frame in manifest.frames {
+                let jpeg = try Data(
+                    contentsOf: dir.appendingPathComponent(frame.filename))
+                let pose = Self.matrixFromRowMajor(frame.pose_world_from_camera)
+                let intr = Intrinsics(
+                    fx: frame.intrinsics.fx, fy: frame.intrinsics.fy,
+                    cx: frame.intrinsics.cx, cy: frame.intrinsics.cy,
+                    width: frame.intrinsics.width, height: frame.intrinsics.height
+                )
+                let meta = KeyframeMetadata(
+                    filename: frame.filename,
+                    timestamp: frame.timestamp,
+                    poseWorldFromCamera: pose,
+                    intrinsics: intr
+                )
+                keyframes.append((jpeg: jpeg, meta: meta))
+            }
+
+            let scanID = sidebar["scan_id"] ?? "unknown"
+            let tier = DeviceTier(rawValue: sidebar["device_tier"] ?? "fallback")
+                ?? .fallback
+            let deviceInfo = DeviceInfo(
+                model: sidebar["device_model"] ?? "unknown",
+                ios: sidebar["device_ios"] ?? "unknown",
+                chip: sidebar["device_chip"] ?? "unknown",
+                tier: tier
+            )
+
+            return ScanUploadPayload(
+                scanID: scanID,
+                roomGeometryJSON: roomGeometryJSON,
+                pointCloudPLY: pointCloudPLY,
+                keyframes: keyframes,
+                scanLogJSON: scanLogJSON,
+                deviceInfo: deviceInfo
+            )
+        } catch {
+            print("[ScanUploadPayload] load failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func matrixFromRowMajor(_ m: [Float]) -> simd_float4x4 {
+        guard m.count == 16 else { return matrix_identity_float4x4 }
+        return simd_float4x4(
+            SIMD4<Float>(m[0],  m[4],  m[8],  m[12]),
+            SIMD4<Float>(m[1],  m[5],  m[9],  m[13]),
+            SIMD4<Float>(m[2],  m[6],  m[10], m[14]),
+            SIMD4<Float>(m[3],  m[7],  m[11], m[15])
+        )
+    }
 }

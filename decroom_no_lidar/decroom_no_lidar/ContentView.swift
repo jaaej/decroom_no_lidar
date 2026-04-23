@@ -203,6 +203,17 @@ final class GuidedARFrameRecorder: ObservableObject {
         isRecording = true
     }
 
+    /// Continue an existing scan after a pause (user tapped "Resume" from
+    /// an error alert, or "More" after stopping). Unlike start(), this
+    /// does NOT wipe frames/shots/keyframeJPEGPaths — so everything the
+    /// user has already captured is preserved.
+    func resume() {
+        if isVideoMode {
+            lockExposureAndFocus()
+        }
+        isRecording = true
+    }
+
     @discardableResult
     func stop() -> CaptureResult {
         isRecording = false
