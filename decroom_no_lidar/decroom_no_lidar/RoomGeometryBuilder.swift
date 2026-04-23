@@ -254,17 +254,42 @@ final class RoomGeometryBuilder {
         let horizontals = mergeColinear(segs.filter { $0.isHorizontal })
         let verticals = mergeColinear(segs.filter { !$0.isHorizontal })
 
-        // 3. Need both axes represented AND at least one axis with ≥2 walls
-        //    to form a rectangle. Otherwise return merged walls as-is.
-        guard !horizontals.isEmpty, !verticals.isEmpty,
-              horizontals.count >= 2 || verticals.count >= 2 else {
+        // 3. Need both axes with ≥2 walls to form a proper rectangle.
+        //    Otherwise return merged walls as-is (partial scan — don't
+        //    fabricate missing walls).
+        guard horizontals.count >= 2, verticals.count >= 2 else {
             return (horizontals + verticals).map { finalize($0) }
         }
 
-        let minZWall = horizontals.min(by: { $0.perpPos < $1.perpPos })!
-        let maxZWall = horizontals.max(by: { $0.perpPos < $1.perpPos })!
-        let minXWall = verticals.min(by: { $0.perpPos < $1.perpPos })!
-        let maxXWall = verticals.max(by: { $0.perpPos < $1.perpPos })!
+        // Pick the "outer wall on each side of the room" — but not blindly
+        // the extreme-most. Problem we hit: furniture surfaces parallel to
+        // a wall (bookshelves, wardrobes, tall cabinets) produce their own
+        // plane anchors. If a wardrobe's plane is 20 cm off the real wall,
+        // max(perpPos) picks the wardrobe, which makes the room ~20 cm
+        // too long on that side. Fix: among walls on each SIDE of the
+        // midline, pick the one with the widest merged span — the real
+        // wall is almost always wider (3-4 m) than a furniture surface
+        // (0.5-1.5 m).
+        func widestOnSide(_ group: [Segment], takeLower: Bool) -> Segment {
+            let minP = group.map { $0.perpPos }.min()!
+            let maxP = group.map { $0.perpPos }.max()!
+            let mid = (minP + maxP) / 2
+            let side = takeLower
+                ? group.filter { $0.perpPos < mid }
+                : group.filter { $0.perpPos >= mid }
+            // Fall back to the most-extreme wall if the side split is empty
+            // (e.g., all walls landed on one side of mid due to floating
+            // point — rare, but defensive).
+            let pool = side.isEmpty ? group : side
+            return pool.max(by: {
+                ($0.spanMax - $0.spanMin) < ($1.spanMax - $1.spanMin)
+            })!
+        }
+
+        let minZWall = widestOnSide(horizontals, takeLower: true)
+        let maxZWall = widestOnSide(horizontals, takeLower: false)
+        let minXWall = widestOnSide(verticals, takeLower: true)
+        let maxXWall = widestOnSide(verticals, takeLower: false)
 
         let minX = minXWall.perpPos
         let maxX = maxXWall.perpPos

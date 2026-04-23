@@ -95,6 +95,32 @@ struct RoomGeometryBuilderTests {
         #expect(geom.walls.count == 1)
     }
 
+    @Test func picksWidestWallPerSideNotFurnitureNearTheWall() {
+        // Real room: 4m x 3m (walls at X=0, X=4, Z=0, Z=3).
+        // A 1.5m-wide bookshelf sits 20cm in front of the north wall
+        // (Z=2.8). Without the widest-per-side fix, consolidation would
+        // pick the bookshelf (max perpPos) as the north wall, making
+        // the room appear 2.8m long instead of 3m.
+        let builder = RoomGeometryBuilder()
+        let north = makeVerticalPlane(tx: 2.0, tz: 3.0, yaw: 0, extentX: 4.0)
+        let bookshelf = makeVerticalPlane(tx: 2.0, tz: 2.8, yaw: 0, extentX: 1.5)
+        let south = makeVerticalPlane(tx: 2.0, tz: 0.0, yaw: 0, extentX: 4.0)
+        let west = makeVerticalPlane(tx: 0.0, tz: 1.5, yaw: .pi / 2, extentX: 3.0)
+        let east = makeVerticalPlane(tx: 4.0, tz: 1.5, yaw: .pi / 2, extentX: 3.0)
+        let floor = MockPlane(identifier: UUID(), planeAlignment: .horizontal,
+                              worldY: 0.0, extents: SIMD3(4, 0, 3))
+
+        let geom = builder.build(from: [north, bookshelf, south, west, east, floor])
+        #expect(geom.walls.count == 4)
+
+        // Room length along Z should be ~3m (north wall at 3.0), NOT ~2.8m
+        // (bookshelf at 2.8). Allow 0.1m tolerance for the merge-mid split.
+        let zValues = geom.walls.flatMap { [$0.start.y, $0.end.y] }
+        let zExtent = zValues.max()! - zValues.min()!
+        #expect(abs(zExtent - 3.0) < 0.15,
+                "Room length should be ~3m (real wall) not ~2.8m (bookshelf), got \(zExtent)")
+    }
+
     @Test func nonSnappingYawPointsInCorrectDirection() {
         // 15° rotation is outside the snap zone (0.1 rad tolerance) —
         // builder must return a yaw close to the actual rotation, not snapped.
