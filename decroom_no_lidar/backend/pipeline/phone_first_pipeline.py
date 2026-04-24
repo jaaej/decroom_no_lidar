@@ -260,92 +260,6 @@ def dimensions_from_point_cloud(
     return (width, length)
 
 
-def dimensions_from_cloud_peaks(
-    positions: "np.ndarray",
-    manhattan_yaw: float,
-    bin_size: float = 0.05,        # 5 cm histogram bins
-    min_peak_ratio: float = 3.0,   # peak density must be >= ratio × median to count
-    min_separation: float = 1.0,   # outer peaks must be at least this far apart (m)
-) -> Tuple[float, float, bool]:
-    """
-    Find room dimensions by locating wall-density peaks in the Manhattan-
-    aligned point cloud. Walls produce tall narrow spikes in the 1-D
-    histogram of each axis; through-wall/through-door bleed produces
-    sparse tails that are filtered out by the min_peak_ratio threshold.
-
-    Returns (width_m, length_m, found_both). `found_both` is True only if
-    we located at least two peaks on each axis with separation >=
-    min_separation — caller should fall back to other sources otherwise.
-    """
-    if np is None or positions is None or len(positions) < 1000:
-        return (0.0, 0.0, False)
-
-    # Rotate into Manhattan frame (same as dimensions_from_point_cloud)
-    cos_y = math.cos(-manhattan_yaw)
-    sin_y = math.sin(-manhattan_yaw)
-    x = positions[:, 0]
-    z = positions[:, 2]
-    xr = x * cos_y - z * sin_y
-    zr = x * sin_y + z * cos_y
-
-    def peaks_span(vals: "np.ndarray") -> Tuple[float, bool]:
-        v_min = float(np.percentile(vals, 0.5))   # guard against single stray extreme
-        v_max = float(np.percentile(vals, 99.5))
-        if v_max - v_min < min_separation:
-            return (0.0, False)
-
-        # Histogram with fixed-width bins
-        n_bins = max(20, int(math.ceil((v_max - v_min) / bin_size)))
-        hist, edges = np.histogram(vals, bins=n_bins, range=(v_min, v_max))
-
-        # Smooth with a 3-bin moving average to reduce noise
-        kernel = np.ones(3) / 3
-        smoothed = np.convolve(hist.astype(np.float32), kernel, mode="same")
-
-        # Peak threshold: density >= min_peak_ratio × median non-zero bin
-        nonzero = smoothed[smoothed > 0]
-        if len(nonzero) == 0:
-            return (0.0, False)
-        median_density = float(np.median(nonzero))
-        threshold = median_density * min_peak_ratio
-
-        # Find local maxima above threshold, simple 3-bin window
-        peak_positions: List[float] = []
-        peak_heights: List[float] = []
-        for i in range(1, len(smoothed) - 1):
-            if (smoothed[i] >= threshold
-                    and smoothed[i] >= smoothed[i - 1]
-                    and smoothed[i] >= smoothed[i + 1]):
-                # Bin center
-                center = (edges[i] + edges[i + 1]) / 2
-                peak_positions.append(float(center))
-                peak_heights.append(float(smoothed[i]))
-
-        if len(peak_positions) < 2:
-            return (0.0, False)
-
-        # Take outermost peaks (leftmost and rightmost) among those that
-        # are the top-K by height — this keeps real walls and rejects
-        # occasional "furniture density" peaks in the middle of the room.
-        # K=4 is a reasonable cap; real rooms rarely have >4 density peaks
-        # on one axis after smoothing.
-        sorted_by_height = sorted(
-            zip(peak_positions, peak_heights),
-            key=lambda t: t[1],
-            reverse=True,
-        )[:4]
-        top_positions = sorted(p for p, _ in sorted_by_height)
-
-        span = top_positions[-1] - top_positions[0]
-        if span < min_separation:
-            return (0.0, False)
-        return (span, True)
-
-    width, ok_x = peaks_span(xr)
-    length, ok_z = peaks_span(zr)
-    return (width, length, ok_x and ok_z)
-
-
 # ── Room envelope from phone walls ───────────────────────────────────────────
 
 def room_envelope_from_walls(
@@ -355,68 +269,58 @@ def room_envelope_from_walls(
     positions: "np.ndarray" = None,
     manhattan_yaw: float = 0.0,
 ) -> RoomInfo:
-    """Derive width/length/height from phone walls + point cloud.
+    """Derive width/length/height from phone walls + cross-check via cloud.
 
-    Priority (highest to lowest):
-      1. Cloud-peaks — histogram of dot density finds wall positions
-         directly. Works even when bleed-through extends the bbox;
-         outliers are sparse tails that don't create peaks.
-      2. Cloud-percentile vs anchor, smaller wins on disagreement.
-         Fallback when peak detection didn't find clean peaks.
+    Width/length: use plane-anchor bbox if it agrees with the point cloud
+    within 20%; otherwise prefer the point-cloud percentile dimensions
+    (they're less affected by ARKit plane-anchor variance).
 
     Height: unchanged — use (ceiling - floor) if available, else 2.5 m.
     """
-    # Plane-anchor bounding box
+    # Plane-anchor bounding box (legacy approach)
     xs: List[float] = []
     zs: List[float] = []
     for w in walls:
         xs.extend([w["start"]["x"], w["end"]["x"]])
         zs.extend([w["start"]["z"], w["end"]["z"]])
+
     anchor_width = (max(xs) - min(xs)) if xs else 0.0
     anchor_length = (max(zs) - min(zs)) if zs else 0.0
 
-    # Cloud percentile
+    # Point-cloud percentile-based dimensions
     cloud_width, cloud_length = (0.0, 0.0)
     if positions is not None and len(positions) > 0:
         cloud_width, cloud_length = dimensions_from_point_cloud(
             positions, manhattan_yaw
         )
 
-    # Cloud peaks (primary source if it succeeds)
-    peak_width, peak_length, peaks_ok = (0.0, 0.0, False)
-    if positions is not None and len(positions) > 0:
-        peak_width, peak_length, peaks_ok = dimensions_from_cloud_peaks(
-            positions, manhattan_yaw
-        )
-
-    def reconcile(anchor: float, cloud: float, peak: float, peaks_ok: bool,
-                   axis: str) -> float:
-        if peaks_ok and peak > 0.1:
-            logger.info(
-                "dimensions %s: peak=%.2f anchor=%.2f cloud=%.2f -> using peak",
-                axis, peak, anchor, cloud,
-            )
-            return peak
+    # Reconcile: both anchor and cloud can overshoot (ARKit extent-bleed,
+    # depth-model seeing through windows/doorways). When they disagree,
+    # the smaller value is almost always closer to truth because both
+    # failure modes cause overshoot. When they agree tightly, we keep the
+    # anchor value for cleaner round numbers matching ARKit's committed
+    # walls.
+    def reconcile(anchor: float, cloud: float) -> float:
         if anchor <= 0.1:
             return cloud if cloud > 0.1 else 4.0
         if cloud <= 0.1:
             return anchor
         diff = abs(anchor - cloud) / max(anchor, cloud)
         if diff <= 0.05:
-            logger.info(
-                "dimensions %s reconcile: anchor=%.2f cloud=%.2f agree (%.1f%%)",
-                axis, anchor, cloud, diff * 100,
-            )
+            # Tight agreement — use anchor (rounder numbers, matches ARKit)
+            logger.info("dimensions reconcile: anchor=%.2f cloud=%.2f agree (%.1f%%)",
+                        anchor, cloud, diff * 100)
             return anchor
+        # Any meaningful disagreement: prefer the smaller value
         chosen = min(anchor, cloud)
         logger.warning(
-            "dimensions %s reconcile: anchor=%.2f cloud=%.2f diff=%.1f%% -> using %.2f (smaller)",
-            axis, anchor, cloud, diff * 100, chosen,
+            "dimensions reconcile: anchor=%.2f cloud=%.2f diff=%.1f%% -> using %.2f (smaller)",
+            anchor, cloud, diff * 100, chosen,
         )
         return chosen
 
-    width = reconcile(anchor_width, cloud_width, peak_width, peaks_ok, "width")
-    length = reconcile(anchor_length, cloud_length, peak_length, peaks_ok, "length")
+    width = reconcile(anchor_width, cloud_width)
+    length = reconcile(anchor_length, cloud_length)
     height = (ceil_h - floor_h) if ceil_h > floor_h else 2.5
 
     walls_out = [
