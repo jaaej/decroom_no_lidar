@@ -11,6 +11,7 @@ import pytest
 from pipeline.phone_first_pipeline import (
     EXPECTED_COORDINATE_SYSTEM,
     PhoneFirstPayload,
+    dimensions_from_cloud_peaks,  # NEW
     dimensions_from_point_cloud,
     load_ply_points,
     map_spatiallm_objects_to_room_objects,
@@ -230,3 +231,81 @@ def test_room_envelope_prefers_smaller_when_moderate_disagreement():
     # Length: anchor=4.0, cloud=~3.4, diff=~15% -> smaller wins -> ~3.4
     assert info.width_m < 3.8, f"width={info.width_m} should prefer smaller"
     assert info.length_m < 3.8, f"length={info.length_m} should prefer smaller"
+
+
+def test_cloud_peaks_finds_walls_at_density_maxima():
+    """Synthetic cloud: dense band at x=0 (west wall) and x=3 (east wall),
+    sparse dots from x=3 to x=4 (through-doorway leak). Peaks should land
+    at 0 and 3, NOT the bbox 4."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    # Dense walls: 5000 dots each within ±3 cm of the wall position
+    west = rng.normal(0.0, 0.03, 5000)
+    east = rng.normal(3.0, 0.03, 5000)
+    # Sparse through-door bleed: 300 dots uniformly 3.0..4.0
+    bleed = rng.uniform(3.0, 4.0, 300)
+    x = np.concatenate([west, east, bleed])
+    # Corresponding Z: dense bands at z=0 and z=3.4 so ok_z is True too
+    # (the function's ok flag requires peaks on both axes).
+    south = rng.normal(0.0, 0.03, 5000)
+    north = rng.normal(3.4, 0.03, 5000)
+    z_bleed = rng.uniform(0.0, 3.4, 300)
+    z = np.concatenate([south, north, z_bleed])
+    y = np.zeros_like(x)
+    positions = np.stack([x, y, z], axis=1).astype(np.float32)
+
+    width, length, ok = dimensions_from_cloud_peaks(positions, manhattan_yaw=0.0)
+    assert ok, "expected peaks to be found"
+    assert abs(width - 3.0) < 0.15, f"expected ~3.0, got {width}"
+
+
+def test_cloud_peaks_returns_not_ok_on_sparse_cloud():
+    """Fewer than 1000 points: peaks fallback signal."""
+    import numpy as np
+    positions = np.random.uniform(0, 3, size=(500, 3)).astype(np.float32)
+    width, length, ok = dimensions_from_cloud_peaks(positions, manhattan_yaw=0.0)
+    assert not ok
+
+
+def test_cloud_peaks_returns_not_ok_when_no_clear_peaks():
+    """Uniform cloud with no density peaks → fallback."""
+    import numpy as np
+    rng = np.random.default_rng(1)
+    xs = rng.uniform(0, 3, 5000)
+    zs = rng.uniform(0, 3, 5000)
+    ys = np.zeros_like(xs)
+    positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
+
+    width, length, ok = dimensions_from_cloud_peaks(positions, manhattan_yaw=0.0)
+    # Uniform distribution has no strong peaks above 3× median density
+    assert not ok or abs(width - 3.0) < 0.3, f"width={width}, ok={ok}"
+
+
+def test_room_envelope_prefers_peaks_when_they_agree():
+    """End-to-end: with dense walls + through-door bleed, envelope width
+    should come from peaks, not from anchor bbox or percentile."""
+    import numpy as np
+    rng = np.random.default_rng(2)
+    # Walls far apart, both visible
+    west = rng.normal(0.0, 0.03, 5000)
+    east = rng.normal(3.0, 0.03, 5000)
+    bleed = rng.uniform(3.0, 4.0, 300)
+    x = np.concatenate([west, east, bleed])
+    # Length walls
+    south = rng.normal(0.0, 0.03, 5000)
+    north = rng.normal(3.4, 0.03, 5000)
+    z = np.concatenate([south, north, rng.uniform(0.0, 3.4, 300)])
+    y = np.zeros_like(x)
+    positions = np.stack([x, y, z], axis=1).astype(np.float32)
+
+    walls = [  # anchors overshoot to 4.0 x 4.0
+        {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 4.0, "z": 0.0}},
+        {"start": {"x": 0.0, "z": 4.0}, "end": {"x": 4.0, "z": 4.0}},
+    ]
+    info = room_envelope_from_walls(
+        walls, floor_h=0.0, ceil_h=2.4,
+        positions=positions, manhattan_yaw=0.0,
+    )
+    # Peaks should win, giving ~3.0 × ~3.4 (not 4 × 4)
+    assert abs(info.width_m - 3.0) < 0.25, f"width={info.width_m}"
+    assert abs(info.length_m - 3.4) < 0.25, f"length={info.length_m}"
