@@ -5,6 +5,16 @@
 **Status**: Design — awaiting implementation plan
 **Predecessor**: Plan 3a (`docs/superpowers/specs/2026-04-19-plan3a-phone-first-backend-integration-design.md`)
 
+## Revision history
+
+- **2026-04-24 (v1)** — Initial spec.
+- **2026-04-24 (v2)** — Revised after alignment review. Changes:
+  1. **Data flow fix (issue #1)**: YOLO → backend payload switched from per-keyframe 2D bboxes to deduped 3D tracked objects from on-device `ObjectTracker`. The phone already unprojects YOLO detections to world positions and collapses duplicates — shipping raw 2D bboxes would have forced the backend to redo that work with less data (no per-keyframe depth map sent). New payload file `yolo_objects.json`; `keyframes.json.detections` stays empty as in 3a.
+  2. **Wall-consolidation prerequisite (issue #2)**: Added explicit blocking dependency on the `RoomGeometryBuilder` wall-consolidation pass (tracked as a known gap in Plan 3a). Without it, `snap_to_walls` would snap beds to fragmented chair-back "walls."
+  3. **SpatialLM door/window format verification (issue #3)**: Promoted from a risk mitigation to a blocking Phase B0 prerequisite — must verify SpatialLM's raw output schema for doors/windows before writing extraction logic.
+  4. **Category-conflict tie-break (issue #4)**: Added row to the consensus table for the case where YOLO and SpatialLM disagree on category at the same position (e.g., bed vs sofa). Resolution: keep SLM's oriented bbox, set `agreement_score = 0.3`, flag for Plan 4a correction UI. Rationale: false positive with correction affordance beats silent false negative.
+  5. **2D→3D unprojection fix (issue #5, caught during spec application)**: Plan 3a shipped a placeholder world-position in `runYoloBackground` (`cameraPos + fwd * 2`) — every tracked object gets the same "2m in front of camera" stub. This makes `ObjectTracker.tracks.position` meaningless as a consensus input. §1 now requires proper depth-map lookup + unprojection before calling `tracker.observe(...)`.
+
 ## Context
 
 Plan 3a shipped the phone-first architecture end-to-end: iOS sends room geometry + PLY + keyframes, backend runs SpatialLM on the phone PLY, returns a `RoomPayload`. What Plan 3a deliberately skipped — to stay MVP-focused — was the **semantic layer on top of raw SpatialLM output**: wall-snapping, duplicate collapse, YOLO/SpatialLM consensus, per-object confidence, door/window handling.
@@ -36,7 +46,7 @@ Plan 3b closes these gaps. This is the semantic layer the design originally envi
 
 ## Architecture
 
-Plan 3b is **backend-heavy with a small iOS change**. Nothing user-facing changes about the capture UX. The capture, geometry, point cloud, and keyframe selection all stay exactly as Plan 3a left them. The only iOS difference: on-device YOLO gets re-enabled so its detections can be packaged into the keyframe manifest and sent to the backend.
+Plan 3b is **backend-heavy with a small iOS change**. Nothing user-facing changes about the capture UX. The capture, geometry, point cloud, and keyframe selection all stay exactly as Plan 3a left them. The only iOS difference: on-device YOLO gets re-enabled, feeds `ObjectTracker`, and the tracker's deduped 3D object list is serialized into a new `yolo_objects.json` payload file sent alongside the rest of the upload.
 
 ### Before Plan 3b (current Plan 3a state)
 
@@ -63,9 +73,11 @@ Phone (unchanged)  ─┐
 ```
 Phone
   └─ ScanSession now runs YOLO (was disabled in Plan 3a)
-      └─ YOLO detections logged per keyframe + accumulated
-        └─ keyframes.json now populated with detections[] per frame
-  └─ Upload payload: adds YOLO detections per keyframe (new field)
+      └─ Each YOLO detection: 2D centroid → depth map → world position
+        └─ ObjectTracker dedupes by category + NN in 3D
+          └─ Tracker holds ONE entry per real-world object
+  └─ finalize() serializes ObjectTracker.tracks → yolo_objects.json
+  └─ Upload payload: adds yolo_objects.json (new file)
                     │
                     ▼
               Backend
@@ -77,11 +89,12 @@ Phone
               ──────────────────────
               NEW: Semantic polish pipeline
               ──────────────────────
-              1. consensus_merge(yolo_frames, slm_objects, walls)
-                 ├─ match YOLO detections to SpatialLM objects by
+              1. consensus_merge(yolo_objects_3d, slm_objects, walls)
+                 ├─ match phone YOLO objects to SpatialLM objects by
                  │   category + 3D position proximity
                  ├─ assign agreement_score per object
-                 └─ flag orphans (YOLO-only or SLM-only)
+                 └─ handle orphans (YOLO-only or SLM-only) and
+                     category conflicts
               2. collapse_duplicates(objects, category_rules)
                  └─ position-based merge within category-specific
                      distance; no hardcoded instance caps
@@ -92,6 +105,8 @@ Phone
                  └─ chair/table/lamp/plant/rug → freestanding
               4. compute_confidence(obj)
                  └─ 0.5*agreement + 0.3*multi_view + 0.2*size_plausibility
+                     (multi_view_score from YOLO object's view_count
+                      when matched; 0.5 default when SLM-only)
               5. extract_doors_windows(slm_output, walls)
                  └─ match door/window positions to walls;
                      set Wall.has_door / has_window
@@ -103,47 +118,76 @@ Phone
 
 ## Components
 
-### 1. iOS — re-enable on-device YOLO
+### 1. iOS — re-enable on-device YOLO **and fix the 2D→3D unprojection**
 
 **File:** `decroom_no_lidar/decroom_no_lidar/decroom_no_lidar/ScanSession.swift`
 
-**Change:** Currently `update(frame:)` has a block gated behind a `false`-only comment (YOLO dispatched to mlQueue is commented out from Plan 3a). Re-enable with a `yoloInFlight` drop-on-busy guard matching the existing `depthInFlight` pattern.
+**Change A — re-enable dispatch:** Currently the YOLO dispatch in `update(frame:)` is commented out (Plan 3a disabled it; see `ScanSession.swift` lines ~130-134). Uncomment + add a `yoloInFlight` drop-on-busy guard matching the existing `depthInFlight` pattern.
+
+**Change B (critical) — replace the placeholder world-position with real depth-based unprojection.** Today `runYoloBackground` (line 321) computes the tracked object's world position as:
+
+```swift
+let approxPos = cameraPos + fwd * 2   // placeholder — every object lands 2m in front of the camera
+self.tracker.observe(category: d.category, worldPosition: approxPos, ...)
+```
+
+This is a stub; it throws the same position at every detection regardless of where the object actually is. For Plan 3b's consensus to match YOLO objects against SpatialLM, the world positions must be correct. Replace with:
+
+1. Identify the YOLO bbox centroid in the model's 640×640 input space.
+2. Map that centroid to the nearest recently-produced depth map pixel (depth map is 518×392 from `DepthRunner`; both derive from the same `ARFrame.capturedImage`, so the mapping is a straight aspect-aware rescale).
+3. Look up depth in meters at that pixel. If invalid / absent, skip the detection (log `yolo_detection_no_depth`).
+4. Unproject `(u, v, depth)` → camera-space 3D using the camera intrinsics used for depth.
+5. Transform to world space via the `ARFrame.camera.transform` pose that matched the depth map.
+6. Call `tracker.observe(...)` with that world position.
+
+**Dispatch-ordering implementation detail (for the plan, not a design decision):** YOLO needs a recent depth map to unproject. Cache the most recent `(depthMap, intrinsics, pose)` tuple from `runDepthBackground`; `runYoloBackground` reads the tuple. If no depth has landed yet, drop the YOLO detection for that frame. No shared mutable state beyond that tuple.
 
 **Frequency:** 1 Hz (every 30 frames). Lower than depth's 2 Hz because YOLO is ~100 ms per frame on iPhone Neural Engine — we don't need more frequent coverage than that for consensus.
 
-**Output:** `YoloDetection` records (category, bbox, confidence, frameIndex). These accumulate in `ObjectTracker` (already in the codebase).
+**Output:** `YoloDetection` records (category, bbox, confidence, frameIndex). Each accepted detection becomes an `ObjectTracker.observe(...)` call with the correctly-unprojected world position.
 
-### 2. iOS — serialize YOLO detections to keyframes manifest
+### 2. iOS — serialize ObjectTracker's 3D tracked objects
 
 **File:** `decroom_no_lidar/decroom_no_lidar/decroom_no_lidar/ScanUploadPayload.swift`
 
-**Change:** `KeyframesManifest.FrameEntry.detections` is currently `[String]` and always empty in 3a. Change to a richer structure:
+**Rationale:** On-device YOLO + depth unprojection + `ObjectTracker` already produce a deduped list of 3D-tracked objects (category + world position + best-frame). Ship that directly. Don't send per-frame 2D bboxes — the backend doesn't have per-keyframe depth maps to reliably lift them to 3D, and redoing NN dedup server-side discards the on-device work.
+
+**Change:** Add a new top-level payload file `yolo_objects.json` alongside `room_geometry.json` / `point_cloud.ply`. Serialized from `ObjectTracker.tracks`:
 
 ```swift
-struct Detection: Codable {
-    let category: String      // COCO-80 name e.g. "bed", "chair"
-    let confidence: Float
-    let bbox: [Float]         // normalized [x, y, w, h]
+struct YoloObject: Codable {
+    let category: String         // COCO-80 name
+    let position: [Float]        // [x, y, z] world, meters, ARKit frame
+    let peakConfidence: Float    // highest observation confidence
+    let viewCount: Int           // observationCount
+    let bestFrameIndex: Int      // index into keyframes for best view
+}
+
+struct YoloObjectsManifest: Codable {
+    let objects: [YoloObject]
 }
 ```
 
-And fill the `detections` array at `finalize()` time by asking the `ObjectTracker` for detections whose `bestFrameIndex == keyframe.frameIndex`.
+**`keyframes.json.detections` stays empty** (as in Plan 3a). Keyframe JPEGs are still sent so the backend can optionally re-run detection server-side for future plans, but they are NOT the consensus input.
 
 ### 3. Backend — consensus merge
 
 **New file:** `backend/pipeline/consensus.py`
 
-**Function:** `consensus_merge(yolo_detections_per_frame, slm_objects, walls) -> (merged_objects, agreement_scores)`
+**Function:** `consensus_merge(yolo_objects_3d, slm_objects, walls) -> (merged_objects, agreement_scores)`
+
+`yolo_objects_3d` is the deduped list from the phone's `ObjectTracker` (see §2) — each entry carries a 3D world position, not a 2D bbox. No per-frame loop is needed on the backend; the phone already collapsed multi-view sightings into one entry per real object.
 
 **Algorithm** (per the design spec's table):
 
 | YOLO says | SpatialLM says | Outcome |
 |---|---|---|
-| Bed at (2, 1.5) | Bed at (2.1, 1.4) | Keep SLM bbox, agreement_score = 1.0 |
-| Bed at (2, 1.5) | Nothing near there | Keep at YOLO position (default oriented bbox), agreement_score = 0.5 |
-| Nothing | Bed at (2, 1.5) | Keep SLM as-is, agreement_score = 0.5 |
-| Bed at (2, 1.5) & (4, 1.5) | Beds at (2, 1.5) & (4, 1.5) | Keep both, agreement_score = 1.0 each |
-| Bed at (2, 1.5) | Beds at (2, 1.5) & (2.2, 1.6) | Collapse to 1, agreement_score = 0.3 |
+| Bed at (2, 1.5) | Bed at (2.1, 1.4) | Keep SLM bbox, `agreement_score = 1.0` |
+| Bed at (2, 1.5) | Nothing near there | Keep at YOLO position with a default oriented bbox sized from the category prior (see §5 dimensions table); `agreement_score = 0.5`. |
+| Nothing | Bed at (2, 1.5) | Keep SLM as-is, `agreement_score = 0.5` |
+| Bed at (2, 1.5) & (4, 1.5) | Beds at (2, 1.5) & (4, 1.5) | Keep both, `agreement_score = 1.0` each |
+| Bed at (2, 1.5) | Beds at (2, 1.5) & (2.2, 1.6) | Collapse to 1, `agreement_score = 0.3` |
+| Bed at (2, 1.5) | **Sofa at (2, 1.5)** | **Category conflict.** Keep SLM (has oriented bbox + category-specific dimensions), `agreement_score = 0.3`. Log diagnostic (`consensus_category_conflict`). Plan 4a correction UI surfaces as low-confidence for user review. |
 
 **Position match distance**: 0.8 m for large items (bed, sofa, dining table), 0.4 m for smaller items (chair, nightstand, lamp).
 
@@ -199,8 +243,8 @@ confidence = 0.5 * agreement_score
            + 0.2 * size_plausibility
 ```
 
-- `agreement_score` — 1.0 if YOLO and SLM both detected this obj; 0.5 if only one; 0.3 if this is a duplicate-collapse survivor
-- `multi_view_score` — 1.0 if the object's 3D position is within 0.5 m of its recorded projection in 3+ keyframes; scales down linearly for fewer views
+- `agreement_score` — 1.0 if YOLO and SLM both detected this obj; 0.5 if only one; 0.3 if this is a duplicate-collapse survivor or a category-conflict resolution
+- `multi_view_score` — when matched to a phone YOLO object, derived from the tracker's `view_count`: 1.0 for ≥3 observations, linearly scaled down for fewer (2 → 0.7, 1 → 0.4). When SLM-only (no YOLO match), use 0.5 as a neutral default.
 - `size_plausibility` — 1.0 if `(width, length, height)` are within typical range for the category (bed: width 1.2-2.2 m, length 1.9-2.2 m, etc.); 0.3 if outside
 
 **Output:** stored in `RoomObject.confidence` (currently hardcoded to 0.5).
@@ -223,24 +267,36 @@ confidence = 0.5 * agreement_score
 
 ## Data shapes
 
-### New field: `keyframes.json` `detections`
+### New payload file: `yolo_objects.json`
+
+Deduped 3D-tracked object list from on-device `ObjectTracker`. One entry per real-world object the phone saw (not per-frame sighting).
 
 ```json
 {
-  "frames": [
+  "objects": [
     {
-      "filename": "frame_00.jpg",
-      "timestamp": 1.234,
-      "pose_world_from_camera": [...],
-      "intrinsics": { ... },
-      "detections": [
-        {"category": "bed", "confidence": 0.87, "bbox": [0.12, 0.34, 0.56, 0.78]},
-        {"category": "lamp", "confidence": 0.62, "bbox": [0.71, 0.22, 0.15, 0.20]}
-      ]
+      "category": "bed",
+      "position": [2.0, 0.0, 1.5],
+      "peak_confidence": 0.87,
+      "view_count": 12,
+      "best_frame_index": 34
+    },
+    {
+      "category": "potted plant",
+      "position": [0.3, 0.8, 2.9],
+      "peak_confidence": 0.62,
+      "view_count": 5,
+      "best_frame_index": 67
     }
   ]
 }
 ```
+
+Coordinate frame matches `room_geometry.json` (ARKit world, right-handed, Y up, meters). Empty array (`"objects": []`) is valid — scan produced no YOLO detections; backend falls back to SLM-only with `agreement_score = 0.5` for everything.
+
+### Unchanged: `keyframes.json` `detections`
+
+Stays `[]` as in Plan 3a. Keyframe JPEGs remain in the payload for future server-side detection/refinement but are not the Plan 3b consensus input.
 
 ### Changed field: `RoomObject.confidence`
 
@@ -278,11 +334,12 @@ Add to `backend/tests/`:
 
 | Test | Coverage |
 |---|---|
-| Updated `ScanUploadPayloadTests` | `keyframes.json` now includes `detections` array with at least one entry; each entry has category/confidence/bbox. |
+| Updated `ScanUploadPayloadTests` | Payload now includes `yolo_objects.json`; each entry has `category`, `position` (3 floats), `peak_confidence`, `view_count`, `best_frame_index`. Empty-objects case serializes as `{"objects": []}`. |
+| New `ScanSessionYoloTrackingTests` | After `update(frame:)` with mock YOLO detections + depth, `ObjectTracker.tracks` contains the expected deduped 3D objects; `finalize()` serializes them correctly. |
 
 ### Contract test update
 
-`tests/fixtures/phone_first_payload/keyframes.json` — regenerate with realistic detection arrays.
+`tests/fixtures/phone_first_payload/` — add `yolo_objects.json` with realistic tracked-object entries. `keyframes.json` stays with empty `detections` arrays.
 
 ### Manual QA
 
@@ -299,25 +356,27 @@ Requires a live SpatialLM tunnel (RunPod). Steps:
 
 ### Phase A — iOS side (prep)
 
-1. Update `ScanUploadPayload.Detection` struct.
-2. Re-enable YOLO in `ScanSession.update(frame:)` with `yoloInFlight` guard.
-3. Update `ScanSession.finalize()` to populate each keyframe's `detections` from `ObjectTracker`.
-4. Update `ScanUploadPayloadTests` to check detections are populated.
+1. Add `YoloObject` / `YoloObjectsManifest` structs to `ScanUploadPayload.swift`.
+2. Re-enable YOLO in `ScanSession.update(frame:)` with `yoloInFlight` guard (1 Hz); verify YOLO 2D-centroid → depth → world-position → `ObjectTracker.observe(...)` path is wired end-to-end.
+3. Update `ScanSession.finalize()` to export `ObjectTracker.tracks` into a `yolo_objects.json` entry on `ScanUploadPayload`; `UploadService.uploadPhoneFirst` adds it to the multipart body.
+4. Update `ScanUploadPayloadTests` + add `ScanSessionYoloTrackingTests`.
 5. Commit + tests pass.
 
 ### Phase B — Backend side (new code)
 
+**B0. Prerequisite — SpatialLM door/window format verification (blocking).** Run one test scan through the live SpatialLM tunnel. Capture the raw parsed output from `parse_spatiallm_output(...)` and confirm door/window entries exist and match the assumed schema (e.g., `class_name == "door"` / `"window"`, with position + wall-attachment metadata). If format differs, update §7 of this spec (and `test_door_window.py`) before writing extraction logic. Document findings in the implementation plan's Phase B0 task.
+
 6. Create `backend/pipeline/consensus.py` with `consensus_merge`, `collapse_duplicates`, `snap_to_walls`, `compute_confidence`.
 7. Write `test_consensus.py`, `test_wall_snapping.py`, `test_confidence.py`.
 8. Modify `phone_first_pipeline.py` to call consensus steps after `map_spatiallm_objects_to_room_objects`.
-9. Write `test_door_window.py`.
+9. Write `test_door_window.py` (format confirmed in B0).
 10. Modify `phone_first_pipeline.py` to extract door/window from SpatialLM output and attach to walls.
 11. Full backend test suite passes.
 
 ### Phase C — Contract fixture
 
-12. Regenerate `tests/fixtures/phone_first_payload/keyframes.json` with realistic detection arrays.
-13. Verify contract tests still pass on both sides.
+12. Add `tests/fixtures/phone_first_payload/yolo_objects.json` with realistic 3D-tracked-object entries (e.g., one bed, two chairs, one lamp at plausible positions). `keyframes.json` stays as-is (empty `detections`).
+13. Verify contract tests still pass on both sides (Swift `UploadServicePhoneFirstTests` + Python `test_phone_first_pipeline.py`).
 
 ### Phase D — QA + merge
 
@@ -335,7 +394,7 @@ Requires a live SpatialLM tunnel (RunPod). Steps:
 *Mitigation*: add `yoloInFlight` guard mirroring `depthInFlight`. Test on device during Phase A.
 
 **Risk**: SpatialLM's door/window output format might differ from what we assume (the current Plan 3a mapping only handles furniture categories).
-*Mitigation*: run one test scan with SpatialLM live, log raw output, pattern-match. This is a 10-minute task that can happen before writing `test_door_window.py`.
+*Mitigation*: **Phase B0 (blocking prerequisite)** — run one test scan through the live SpatialLM tunnel before writing any door/window extraction logic. If the format differs, update §7 and `test_door_window.py` before proceeding.
 
 **Risk**: Wall-snapping could move an object to the wrong wall if two walls are equidistant.
 *Mitigation*: tie-breaker rules per category (desk perpendicular to long axis); for ambiguous cases, log and don't snap (leave at SpatialLM position).
@@ -348,7 +407,8 @@ Requires a live SpatialLM tunnel (RunPod). Steps:
 
 ## Dependencies
 
-- SpatialLM running and producing output including doors/windows. Needs RunPod tunnel.
+- **Prerequisite (blocking): `RoomGeometryBuilder` wall-consolidation pass merged to `main`.** Plan 3a's known gap (`memory/plan_status.md`): raw ARKit plane anchors pass through 1:1 with no merging, producing fragmented wall strips and chair-back "walls" in cluttered rooms. Running `snap_to_walls` (§5) on fragmented walls would snap beds to non-wall segments. Must be merged before Phase B starts.
+- SpatialLM running and producing output including doors/windows. Needs RunPod tunnel. Door/window format must be verified in Phase B0 (see Migration plan) before §7 logic is written.
 - No new third-party dependencies.
 - Plan 3a merged to main first (Plan 3b builds on that branch's code).
 
@@ -370,16 +430,19 @@ Requires a live SpatialLM tunnel (RunPod). Steps:
 - `backend/tests/test_wall_snapping.py`
 - `backend/tests/test_confidence.py`
 - `backend/tests/test_door_window.py`
+- `decroom_no_lidar/decroom_no_lidarTests/ScanSessionYoloTrackingTests.swift` — covers YOLO → depth → world-position → `ObjectTracker` → serialized `yolo_objects.json` path.
+- `tests/fixtures/phone_first_payload/yolo_objects.json` — contract fixture with realistic tracked-object entries.
 - `docs/superpowers/plans/2026-04-24-plan3b-semantic-polish.md` — the implementation plan (to be written via `/superpowers:writing-plans`)
 
 ### Modified files
 
-- `decroom_no_lidar/decroom_no_lidar/ScanSession.swift` — re-enable YOLO dispatch
-- `decroom_no_lidar/decroom_no_lidar/ScanUploadPayload.swift` — `Detection` struct + populate manifest
-- `decroom_no_lidar/decroom_no_lidarTests/ScanUploadPayloadTests.swift` — assert detections populated
-- `backend/pipeline/phone_first_pipeline.py` — call consensus pipeline, extract doors/windows
-- `backend/tests/test_phone_first_pipeline.py` — update expectations for new RoomPayload shape
-- `tests/fixtures/phone_first_payload/keyframes.json` — regenerate with detection arrays
+- `decroom_no_lidar/decroom_no_lidar/ScanSession.swift` — re-enable YOLO dispatch; ensure tracker observations are recorded.
+- `decroom_no_lidar/decroom_no_lidar/ScanUploadPayload.swift` — add `YoloObject` / `YoloObjectsManifest` structs; include `yolo_objects.json` in multipart body.
+- `decroom_no_lidar/decroom_no_lidar/UploadService.swift` — add `yolo_objects.json` field to the phone-first multipart POST.
+- `decroom_no_lidar/decroom_no_lidarTests/ScanUploadPayloadTests.swift` — assert `yolo_objects.json` structure.
+- `backend/pipeline/phone_first_pipeline.py` — ingest `yolo_objects.json`; call consensus pipeline; extract doors/windows.
+- `backend/main.py` — accept `yolo_objects` multipart field on `/api/upload/phone-first`.
+- `backend/tests/test_phone_first_pipeline.py` — update expectations for new RoomPayload shape.
 
 ## How a new conversation should pick this up
 
