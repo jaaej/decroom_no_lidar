@@ -218,19 +218,104 @@ def check_wall_agreement(
             )
 
 
+# ── Dimensions from point cloud (more robust than plane-anchor bbox) ─────────
+
+def dimensions_from_point_cloud(
+    positions: "np.ndarray",
+    manhattan_yaw: float,
+    percentile_low: float = 5.0,
+    percentile_high: float = 95.0,
+) -> Tuple[float, float]:
+    """
+    Compute (width_m, length_m) from the Manhattan-aligned point cloud
+    using percentile bounds. Robust against:
+      - A few stray dots (mirror reflections, depth noise at edges) —
+        clipped by the percentile
+      - ARKit plane-anchor variance — doesn't care about anchors at all
+      - Mis-classified plane anchors pushed past real walls — irrelevant
+        here, we look at depth-derived surface positions
+
+    Returns (width_along_X_axis, length_along_Z_axis) in the Manhattan
+    frame, in meters.
+    """
+    if np is None or positions is None or len(positions) == 0:
+        return (0.0, 0.0)
+
+    # Rotate points into Manhattan frame so the room aligns to X/Z axes.
+    # manhattan_yaw is the room's rotation around Y, so we apply -yaw.
+    cos_y = math.cos(-manhattan_yaw)
+    sin_y = math.sin(-manhattan_yaw)
+    x = positions[:, 0]
+    z = positions[:, 2]
+    xr = x * cos_y - z * sin_y
+    zr = x * sin_y + z * cos_y
+
+    x_lo = float(np.percentile(xr, percentile_low))
+    x_hi = float(np.percentile(xr, percentile_high))
+    z_lo = float(np.percentile(zr, percentile_low))
+    z_hi = float(np.percentile(zr, percentile_high))
+
+    width = max(x_hi - x_lo, 0.1)
+    length = max(z_hi - z_lo, 0.1)
+    return (width, length)
+
+
 # ── Room envelope from phone walls ───────────────────────────────────────────
 
-def room_envelope_from_walls(walls: List[Dict[str, Any]], floor_h: float, ceil_h: float) -> RoomInfo:
-    """Derive width/length/height from phone walls' XZ bounding box."""
+def room_envelope_from_walls(
+    walls: List[Dict[str, Any]],
+    floor_h: float,
+    ceil_h: float,
+    positions: "np.ndarray" = None,
+    manhattan_yaw: float = 0.0,
+) -> RoomInfo:
+    """Derive width/length/height from phone walls + cross-check via cloud.
+
+    Width/length: use plane-anchor bbox if it agrees with the point cloud
+    within 20%; otherwise prefer the point-cloud percentile dimensions
+    (they're less affected by ARKit plane-anchor variance).
+
+    Height: unchanged — use (ceiling - floor) if available, else 2.5 m.
+    """
+    # Plane-anchor bounding box (legacy approach)
     xs: List[float] = []
     zs: List[float] = []
     for w in walls:
         xs.extend([w["start"]["x"], w["end"]["x"]])
         zs.extend([w["start"]["z"], w["end"]["z"]])
-    if not xs:
-        return RoomInfo(id=str(uuid.uuid4())[:8], width_m=4.0, length_m=4.0, height_m=2.5)
-    width = max(xs) - min(xs) if xs else 4.0
-    length = max(zs) - min(zs) if zs else 4.0
+
+    anchor_width = (max(xs) - min(xs)) if xs else 0.0
+    anchor_length = (max(zs) - min(zs)) if zs else 0.0
+
+    # Point-cloud percentile-based dimensions
+    cloud_width, cloud_length = (0.0, 0.0)
+    if positions is not None and len(positions) > 0:
+        cloud_width, cloud_length = dimensions_from_point_cloud(
+            positions, manhattan_yaw
+        )
+
+    # Reconcile: prefer anchor bbox if it agrees with cloud (within 20%).
+    # If they disagree or anchor bbox is empty, use cloud.
+    def reconcile(anchor: float, cloud: float) -> float:
+        if anchor <= 0.1:
+            return cloud if cloud > 0.1 else 4.0
+        if cloud <= 0.1:
+            return anchor
+        diff = abs(anchor - cloud) / max(anchor, cloud)
+        if diff <= 0.20:
+            # Agreement: anchor bbox is usable
+            logger.info("dimensions reconcile: anchor=%.2f cloud=%.2f agree (%.1f%%)",
+                        anchor, cloud, diff * 100)
+            return anchor
+        # Disagreement: prefer cloud (more deterministic)
+        logger.warning(
+            "dimensions reconcile: anchor=%.2f cloud=%.2f DIVERGE (%.1f%%) — using cloud",
+            anchor, cloud, diff * 100
+        )
+        return cloud
+
+    width = reconcile(anchor_width, cloud_width)
+    length = reconcile(anchor_length, cloud_length)
     height = (ceil_h - floor_h) if ceil_h > floor_h else 2.5
 
     walls_out = [
@@ -421,10 +506,13 @@ def run_phone_first_pipeline(
 
     check_wall_agreement(payload.room_geometry["walls"], slm_walls or [])
 
+    manhattan_yaw = float(payload.room_geometry.get("manhattan_yaw", 0.0))
     room_info = room_envelope_from_walls(
         payload.room_geometry["walls"],
         payload.room_geometry["floor_height"],
         payload.room_geometry["ceiling_height"],
+        positions=positions,
+        manhattan_yaw=manhattan_yaw,
     )
     objects = map_spatiallm_objects_to_room_objects(slm_objects or [])
 

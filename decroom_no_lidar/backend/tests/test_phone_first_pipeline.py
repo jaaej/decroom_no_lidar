@@ -11,6 +11,7 @@ import pytest
 from pipeline.phone_first_pipeline import (
     EXPECTED_COORDINATE_SYSTEM,
     PhoneFirstPayload,
+    dimensions_from_point_cloud,
     load_ply_points,
     map_spatiallm_objects_to_room_objects,
     room_envelope_from_walls,
@@ -126,3 +127,77 @@ def test_zero_objects_returns_empty_list():
         result = run_phone_first_pipeline(payload, object())
 
     assert result["objects"] == []
+
+
+def test_dimensions_from_point_cloud_basic():
+    """Percentile bbox of a simple point cloud should approximate span."""
+    # Points spanning X from 0 to 3, Z from 0 to 4, with a few outliers
+    import numpy as np
+    xs = np.concatenate([
+        np.random.uniform(0.0, 3.0, 1000),
+        np.array([-2.0, 5.0]),  # outliers (should be clipped by percentile)
+    ])
+    zs = np.concatenate([
+        np.random.uniform(0.0, 4.0, 1000),
+        np.array([-3.0, 7.0]),  # outliers
+    ])
+    ys = np.zeros_like(xs)
+    positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
+
+    width, length = dimensions_from_point_cloud(positions, manhattan_yaw=0.0)
+    # Percentile-based, so should be close to the bulk spans 3x4, not 7x10
+    assert 2.5 <= width <= 3.5, f"width={width}"
+    assert 3.5 <= length <= 4.5, f"length={length}"
+
+
+def test_dimensions_from_point_cloud_empty_returns_zero():
+    import numpy as np
+    empty = np.zeros((0, 3), dtype=np.float32)
+    width, length = dimensions_from_point_cloud(empty, manhattan_yaw=0.0)
+    assert width == 0.0 and length == 0.0
+
+
+def test_room_envelope_prefers_cloud_when_anchors_diverge():
+    """If the plane-anchor bbox is 5m x 5m but the cloud says 3m x 3m,
+    the cloud's dimensions should win."""
+    import numpy as np
+    # Walls suggest a 5m × 5m room
+    walls = [
+        {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 5.0, "z": 0.0}},
+        {"start": {"x": 0.0, "z": 5.0}, "end": {"x": 5.0, "z": 5.0}},
+    ]
+    # But the point cloud is 3m × 3m, centered near origin
+    xs = np.random.uniform(0.0, 3.0, 1000)
+    zs = np.random.uniform(0.0, 3.0, 1000)
+    ys = np.zeros_like(xs)
+    positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
+
+    info = room_envelope_from_walls(
+        walls, floor_h=0.0, ceil_h=2.4,
+        positions=positions, manhattan_yaw=0.0,
+    )
+    # Cloud wins. Expect ~3m, not ~5m.
+    assert info.width_m < 4.0, f"width={info.width_m}"
+    assert info.length_m < 4.0, f"length={info.length_m}"
+
+
+def test_room_envelope_keeps_anchors_when_agreement():
+    """If plane anchors and cloud agree within 20%, use anchor bbox."""
+    import numpy as np
+    walls = [
+        {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 3.0, "z": 0.0}},
+        {"start": {"x": 0.0, "z": 3.4}, "end": {"x": 3.0, "z": 3.4}},
+    ]
+    xs = np.random.uniform(0.1, 2.9, 1000)  # cloud bbox ~2.8
+    zs = np.random.uniform(0.1, 3.3, 1000)  # cloud bbox ~3.2
+    ys = np.zeros_like(xs)
+    positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
+
+    info = room_envelope_from_walls(
+        walls, floor_h=0.0, ceil_h=2.4,
+        positions=positions, manhattan_yaw=0.0,
+    )
+    # Anchors = 3.0 × 3.4, cloud = ~2.8 × ~3.2 — within 20% on both.
+    # Expect anchor-derived dims (3.0, 3.4).
+    assert 2.9 <= info.width_m <= 3.1
+    assert 3.3 <= info.length_m <= 3.5
