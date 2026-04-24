@@ -145,9 +145,10 @@ def test_dimensions_from_point_cloud_basic():
     positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
 
     width, length = dimensions_from_point_cloud(positions, manhattan_yaw=0.0)
-    # Percentile-based, so should be close to the bulk spans 3x4, not 7x10
-    assert 2.5 <= width <= 3.5, f"width={width}"
-    assert 3.5 <= length <= 4.5, f"length={length}"
+    # Percentile-based (10/90), so the bbox is ~80% of the bulk span:
+    # uniform 0..3 -> ~2.4, uniform 0..4 -> ~3.2. Outliers are clipped.
+    assert 2.0 <= width <= 3.0, f"width={width}"
+    assert 2.8 <= length <= 3.8, f"length={length}"
 
 
 def test_dimensions_from_point_cloud_empty_returns_zero():
@@ -181,15 +182,17 @@ def test_room_envelope_prefers_cloud_when_anchors_diverge():
     assert info.length_m < 4.0, f"length={info.length_m}"
 
 
-def test_room_envelope_keeps_anchors_when_agreement():
-    """If plane anchors and cloud agree within 20%, use anchor bbox."""
+def test_room_envelope_keeps_anchors_when_tight_agreement():
+    """When plane-anchor and cloud bbox agree within 5%, use anchor bbox
+    (preserves the clean round numbers ARKit gives). With 10/90 percentile
+    the cloud bbox of uniform points 0..3 is roughly 2.4 (0.3..2.7)."""
     import numpy as np
     walls = [
-        {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 3.0, "z": 0.0}},
-        {"start": {"x": 0.0, "z": 3.4}, "end": {"x": 3.0, "z": 3.4}},
+        {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 2.42, "z": 0.0}},
+        {"start": {"x": 0.0, "z": 2.42}, "end": {"x": 2.42, "z": 2.42}},
     ]
-    xs = np.random.uniform(0.1, 2.9, 1000)  # cloud bbox ~2.8
-    zs = np.random.uniform(0.1, 3.3, 1000)  # cloud bbox ~3.2
+    xs = np.random.uniform(0.0, 3.0, 2000)  # 10-90 percentile -> ~0.3..2.7 = 2.4
+    zs = np.random.uniform(0.0, 3.0, 2000)
     ys = np.zeros_like(xs)
     positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
 
@@ -197,7 +200,33 @@ def test_room_envelope_keeps_anchors_when_agreement():
         walls, floor_h=0.0, ceil_h=2.4,
         positions=positions, manhattan_yaw=0.0,
     )
-    # Anchors = 3.0 × 3.4, cloud = ~2.8 × ~3.2 — within 20% on both.
-    # Expect anchor-derived dims (3.0, 3.4).
-    assert 2.9 <= info.width_m <= 3.1
-    assert 3.3 <= info.length_m <= 3.5
+    # Anchors say 2.42 x 2.42, cloud says ~2.4 x ~2.4 — agree to <5%.
+    # Expect anchor-derived dims.
+    assert 2.35 <= info.width_m <= 2.50
+    assert 2.35 <= info.length_m <= 2.50
+
+
+def test_room_envelope_prefers_smaller_when_moderate_disagreement():
+    """When they disagree by more than 5% (but less than the old 20%
+    threshold), the smaller value wins — because both failure modes
+    (ARKit extent bleed, cloud seeing through walls) cause overshoot."""
+    import numpy as np
+    # Anchor bbox 4.1 x 4.0 (overshoots from ARKit extent bleed)
+    walls = [
+        {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 4.1, "z": 0.0}},
+        {"start": {"x": 0.0, "z": 4.0}, "end": {"x": 4.1, "z": 4.0}},
+    ]
+    # Cloud bbox ~3.4 x ~3.4 (better reflects the real room)
+    xs = np.random.uniform(0.3, 3.7, 2000)
+    zs = np.random.uniform(0.3, 3.7, 2000)
+    ys = np.zeros_like(xs)
+    positions = np.stack([xs, ys, zs], axis=1).astype(np.float32)
+
+    info = room_envelope_from_walls(
+        walls, floor_h=0.0, ceil_h=2.4,
+        positions=positions, manhattan_yaw=0.0,
+    )
+    # Width: anchor=4.1, cloud=~3.4, diff=~17% -> smaller wins -> ~3.4
+    # Length: anchor=4.0, cloud=~3.4, diff=~15% -> smaller wins -> ~3.4
+    assert info.width_m < 3.8, f"width={info.width_m} should prefer smaller"
+    assert info.length_m < 3.8, f"length={info.length_m} should prefer smaller"

@@ -223,8 +223,8 @@ def check_wall_agreement(
 def dimensions_from_point_cloud(
     positions: "np.ndarray",
     manhattan_yaw: float,
-    percentile_low: float = 5.0,
-    percentile_high: float = 95.0,
+    percentile_low: float = 10.0,
+    percentile_high: float = 90.0,
 ) -> Tuple[float, float]:
     """
     Compute (width_m, length_m) from the Manhattan-aligned point cloud
@@ -294,25 +294,30 @@ def room_envelope_from_walls(
             positions, manhattan_yaw
         )
 
-    # Reconcile: prefer anchor bbox if it agrees with cloud (within 20%).
-    # If they disagree or anchor bbox is empty, use cloud.
+    # Reconcile: both anchor and cloud can overshoot (ARKit extent-bleed,
+    # depth-model seeing through windows/doorways). When they disagree,
+    # the smaller value is almost always closer to truth because both
+    # failure modes cause overshoot. When they agree tightly, we keep the
+    # anchor value for cleaner round numbers matching ARKit's committed
+    # walls.
     def reconcile(anchor: float, cloud: float) -> float:
         if anchor <= 0.1:
             return cloud if cloud > 0.1 else 4.0
         if cloud <= 0.1:
             return anchor
         diff = abs(anchor - cloud) / max(anchor, cloud)
-        if diff <= 0.20:
-            # Agreement: anchor bbox is usable
+        if diff <= 0.05:
+            # Tight agreement — use anchor (rounder numbers, matches ARKit)
             logger.info("dimensions reconcile: anchor=%.2f cloud=%.2f agree (%.1f%%)",
                         anchor, cloud, diff * 100)
             return anchor
-        # Disagreement: prefer cloud (more deterministic)
+        # Any meaningful disagreement: prefer the smaller value
+        chosen = min(anchor, cloud)
         logger.warning(
-            "dimensions reconcile: anchor=%.2f cloud=%.2f DIVERGE (%.1f%%) — using cloud",
-            anchor, cloud, diff * 100
+            "dimensions reconcile: anchor=%.2f cloud=%.2f diff=%.1f%% -> using %.2f (smaller)",
+            anchor, cloud, diff * 100, chosen,
         )
-        return cloud
+        return chosen
 
     width = reconcile(anchor_width, cloud_width)
     length = reconcile(anchor_length, cloud_length)
