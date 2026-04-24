@@ -51,6 +51,14 @@ struct VideoRecorderView: View {
     @State private var showNoWallsWarning = false
     @State private var lastUploadedPayload: ScanUploadPayload? = nil
 
+    /// Number of frames being uploaded right now. Prefers the in-flight
+    /// payload's keyframe count (works for both fresh scans and
+    /// "Use Last Capture"); falls back to the recorder's live count for
+    /// the rare case the payload isn't set yet.
+    private var uploadFrameCount: Int {
+        lastUploadedPayload?.keyframes.count ?? recorder.capturedCount
+    }
+
     private var coveragePercent: Int {
         let filled = coverage.filledYawBins.count
         return coverage.yawBins > 0 ? Int(Float(filled) / Float(coverage.yawBins) * 100) : 0
@@ -222,7 +230,7 @@ struct VideoRecorderView: View {
                 Color.black.opacity(0.6).ignoresSafeArea()
                 VStack(spacing: 16) {
                     ProgressView().scaleEffect(1.5).tint(.white)
-                    Text("Uploading \(recorder.capturedCount) frames...")
+                    Text("Uploading \(uploadFrameCount) frames...")
                         .font(.headline).foregroundStyle(.white)
                     Text("This may take a minute")
                         .font(.caption).foregroundStyle(.white.opacity(0.6))
@@ -456,7 +464,8 @@ struct VideoRecorderView: View {
             processor.state = .failed("Couldn't load the previous capture.")
             return
         }
-        print("[VideoRecorderView] Re-uploading last capture scan=\(payload.scanID)")
+        lastUploadedPayload = payload
+        print("[VideoRecorderView] Re-uploading last capture scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
         processor.processPhoneFirstPayload(payload)
     }
 }
