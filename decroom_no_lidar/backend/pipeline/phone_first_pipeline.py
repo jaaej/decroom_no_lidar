@@ -223,8 +223,8 @@ def check_wall_agreement(
 def dimensions_from_point_cloud(
     positions: "np.ndarray",
     manhattan_yaw: float,
-    percentile_low: float = 10.0,
-    percentile_high: float = 90.0,
+    percentile_low: float = 8.0,
+    percentile_high: float = 92.0,
 ) -> Tuple[float, float]:
     """
     Compute (width_m, length_m) from the Manhattan-aligned point cloud
