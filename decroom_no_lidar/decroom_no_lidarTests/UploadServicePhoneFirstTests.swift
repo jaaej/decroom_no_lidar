@@ -53,4 +53,28 @@ struct UploadServicePhoneFirstTests {
         let bodyStr = String(data: body, encoding: .utf8) ?? ""
         #expect(bodyStr.contains("jpeg-bytes"))
     }
+
+    @Test func multipartBodyContainsYoloObjectsPart() throws {
+        let intr = Intrinsics(fx: 1500, fy: 1500, cx: 720, cy: 960, width: 1440, height: 1920)
+        let meta = ScanUploadPayload.KeyframeMetadata(
+            filename: "frame_00.jpg",
+            timestamp: 1.23,
+            poseWorldFromCamera: matrix_identity_float4x4,
+            intrinsics: intr
+        )
+        let payload = ScanUploadPayload(
+            scanID: "abc12345",
+            roomGeometryJSON: Data(#"{"walls":[]}"#.utf8),
+            pointCloudPLY: Data(repeating: 0, count: 100),
+            keyframes: [(Data("jpeg".utf8), meta)],
+            scanLogJSON: Data("{}".utf8),
+            yoloObjectsJSON: Data(#"{"objects":[{"category":"bed"}]}"#.utf8),
+            deviceInfo: DeviceInfo(model: "test", ios: "17", chip: "test", tier: .full)
+        )
+        let body = try UploadService._buildPhoneFirstMultipartBody(payload, boundary: "TEST")
+        let bodyStr = String(data: body, encoding: .utf8) ?? ""
+        #expect(bodyStr.contains(#"name="yolo_objects""#))
+        #expect(bodyStr.contains(#"filename="yolo_objects.json""#))
+        #expect(bodyStr.contains(#""category":"bed""#))
+    }
 }

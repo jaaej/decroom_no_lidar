@@ -234,6 +234,9 @@ struct UploadService {
         appendPart(name: "scan_log", filename: "scan_log.json",
                     contentType: "application/json",
                     bytes: payload.scanLogJSON)
+        appendPart(name: "yolo_objects", filename: "yolo_objects.json",
+                    contentType: "application/json",
+                    bytes: payload.yoloObjectsJSON)
 
         data.append("--\(boundary)--\r\n")
         return data
