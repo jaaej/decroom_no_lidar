@@ -334,26 +334,40 @@ final class ScanSession: ObservableObject {
             return
         }
 
-        let cameraPos = SIMD3<Float>(
-            cameraTransform.columns.3.x,
-            cameraTransform.columns.3.y,
-            cameraTransform.columns.3.z
-        )
-        let fwd = -SIMD3<Float>(
-            cameraTransform.columns.2.x,
-            cameraTransform.columns.2.y,
-            cameraTransform.columns.2.z
-        )
+        // Need a recent depth snapshot to unproject. If we haven't produced
+        // one yet (depth hasn't run, or lost), drop this YOLO result — the
+        // placeholder "2m in front" was worse than dropping.
+        guard let snap = self.latestDepthSnapshot() else {
+            Task { @MainActor [weak self] in
+                self?.logger.logEvent("yolo_detection_no_depth", at: self?.elapsed() ?? 0,
+                                        data: ["frame": "\(frameIndex)",
+                                               "detections": "\(dets.count)"])
+            }
+            return
+        }
+
+        // Observe each detection at its real world position.
+        var observations: [(YoloDetection, SIMD3<Float>)] = []
+        for d in dets where d.confidence > 0.5 {
+            let center = SIMD2<Float>(Float(d.bbox.midX), Float(d.bbox.midY))
+            guard let worldPos = YoloUnprojector.worldPosition(
+                yoloBboxCenterNormalized: center,
+                depthMap: snap.depths,
+                depthWidth: snap.width, depthHeight: snap.height,
+                depthIntrinsics: snap.intrinsics,
+                worldFromCamera: snap.worldFromCamera
+            ) else { continue }
+            observations.append((d, worldPos))
+        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.recentDetections = dets
-            for d in dets where d.confidence > 0.5 {
-                let approxPos = cameraPos + fwd * 2
+            for (d, pos) in observations {
                 self.tracker.observe(category: d.category,
-                                      worldPosition: approxPos,
+                                      worldPosition: pos,
                                       confidence: d.confidence,
-                                      frameIndex: frameIndex)
+                                      frameIndex: d.frameIndex)
             }
         }
     }
