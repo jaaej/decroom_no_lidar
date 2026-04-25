@@ -64,6 +64,12 @@ final class ScanSession: ObservableObject {
     // the pool is exhausted and ARKit pauses frame delivery (~10s freezes).
     private var depthInFlight = false
 
+    // YOLO drop-on-busy guard mirroring depthInFlight. 1Hz cadence is plenty
+    // for consensus — YOLO is ~100ms per frame on iPhone Neural Engine.
+    private var yoloInFlight = false
+    private let yoloFrameInterval = 30   // 1 Hz at 30fps
+    private var lastYoloFrame = -1
+
     /// Cached snapshot of the last depth inference. Written by the ML queue
     /// after each depth inference; read by the ML queue before each YOLO
     /// inference to unproject bbox centroids to world space.
@@ -149,11 +155,27 @@ final class ScanSession: ObservableObject {
             }
         }
 
-        // YOLO inference is disabled in Plan 3a — its outputs
-        // (recentDetections, tracker observations) are not consumed by any
-        // live code path. Keeping it disabled avoids the extra ML pressure.
-        // Reenable in 3b when consensus logic lands. (runYoloBackground
-        // remains in the file and can be re-dispatched there.)
+        // YOLO inference at 1 Hz for consensus with backend SpatialLM.
+        // Drop-on-busy guard prevents ARKit buffer-pool exhaustion.
+        if !yoloInFlight,
+           let yolo = yoloRunner,
+           frameIndex - lastYoloFrame >= yoloFrameInterval {
+            lastYoloFrame = frameIndex
+            yoloInFlight = true
+            let capturedImage = frame.capturedImage
+            let pose = frame.camera.transform
+            let fi = frameIndex
+
+            mlQueue.async { [weak self] in
+                self?.runYoloBackground(
+                    capturedImage: capturedImage,
+                    cameraTransform: pose,
+                    yolo: yolo,
+                    frameIndex: fi
+                )
+                Task { @MainActor [weak self] in self?.yoloInFlight = false }
+            }
+        }
     }
 
     /// Update plane anchors — called from didAdd/didUpdate anchor delegate.
