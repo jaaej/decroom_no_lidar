@@ -19,6 +19,7 @@ struct UploadServicePhoneFirstTests {
             pointCloudPLY: Data("ply".utf8),
             keyframes: [(Data("jpeg-bytes".utf8), meta)],
             scanLogJSON: Data("{}".utf8),
+            yoloObjectsJSON: Data(#"{"objects":[]}"#.utf8),
             deviceInfo: DeviceInfo(model: "test", ios: "17.0",
                                     chip: "test", tier: .full)
         )

@@ -252,10 +252,21 @@ final class ScanSession: ObservableObject {
             throw ScanError.payloadBuildFailed(detail: "scan log write: \(error.localizedDescription)")
         }
 
+        // Encode YOLO 3D-tracked objects from on-device ObjectTracker.
+        let yoloJSON: Data
+        do {
+            yoloJSON = try ScanUploadPayload.encodeYoloObjects(tracker.tracks)
+        } catch {
+            throw ScanError.payloadBuildFailed(
+                detail: "yolo_objects encode: \(error.localizedDescription)"
+            )
+        }
+
         logger.logEvent("scan_finalize_succeeded", at: elapsed(),
                         data: ["walls": "\(geometry.walls.count)",
                                "points": "\(pointCloud.count)",
-                               "keyframes": "\(keyframes.count)"])
+                               "keyframes": "\(keyframes.count)",
+                               "yolo_objects": "\(tracker.tracks.count)"])
 
         return ScanUploadPayload(
             scanID: logger.scanId,
@@ -263,6 +274,7 @@ final class ScanSession: ObservableObject {
             pointCloudPLY: plyData,
             keyframes: zip(keyframeJPEGs, keyframes).map { ($0.0, $0.1) },
             scanLogJSON: logData,
+            yoloObjectsJSON: yoloJSON,
             deviceInfo: DeviceInfo.current()
         )
     }

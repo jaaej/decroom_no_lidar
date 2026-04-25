@@ -24,6 +24,7 @@ struct ScanUploadPayload {
     let pointCloudPLY: Data
     let keyframes: [(jpeg: Data, meta: KeyframeMetadata)]
     let scanLogJSON: Data
+    let yoloObjectsJSON: Data
     let deviceInfo: DeviceInfo
 
     /// Matches room_geometry.json schema from the design spec.
@@ -38,6 +39,19 @@ struct ScanUploadPayload {
         let ceiling_height: Float
         let manhattan_yaw: Float
         let coordinate_system: String
+    }
+
+    /// Matches yolo_objects.json schema from the design spec.
+    /// One entry per deduped 3D-tracked object from on-device ObjectTracker.
+    struct YoloObject: Codable {
+        let category: String
+        let position: [Float]       // [x, y, z] ARKit world frame, meters
+        let peak_confidence: Float
+        let view_count: Int
+        let best_frame_index: Int
+    }
+    struct YoloObjectsManifest: Codable {
+        let objects: [YoloObject]
     }
 
     /// Matches keyframes.json manifest schema.
@@ -79,6 +93,22 @@ struct ScanUploadPayload {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted]
         return try encoder.encode(json)
+    }
+
+    static func encodeYoloObjects(_ tracks: [ObjectTrack]) throws -> Data {
+        let entries = tracks.map { t in
+            YoloObject(
+                category: t.category,
+                position: [t.latestPosition.x, t.latestPosition.y, t.latestPosition.z],
+                peak_confidence: t.bestConfidence,
+                view_count: t.observationCount,
+                best_frame_index: t.bestFrameIndex
+            )
+        }
+        let manifest = YoloObjectsManifest(objects: entries)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        return try encoder.encode(manifest)
     }
 
     static func encodeKeyframesManifest(_ frames: [KeyframeMetadata]) throws -> Data {
@@ -146,6 +176,8 @@ struct ScanUploadPayload {
                 to: dir.appendingPathComponent("point_cloud.ply"))
             try scanLogJSON.write(
                 to: dir.appendingPathComponent("scan_log.json"))
+            try yoloObjectsJSON.write(
+                to: dir.appendingPathComponent("yolo_objects.json"))
             // keyframes.json manifest rebuilt from the metas + ID
             let manifestData = try Self.encodeKeyframesManifest(
                 keyframes.map { $0.meta }
@@ -191,6 +223,9 @@ struct ScanUploadPayload {
                 contentsOf: dir.appendingPathComponent("scan_log.json"))
             let manifestData = try Data(
                 contentsOf: dir.appendingPathComponent("keyframes.json"))
+            let yoloData = (try? Data(
+                contentsOf: dir.appendingPathComponent("yolo_objects.json")))
+                ?? Data("{\"objects\":[]}".utf8)
             let sidebarData = try Data(
                 contentsOf: dir.appendingPathComponent("sidebar.json"))
 
@@ -234,6 +269,7 @@ struct ScanUploadPayload {
                 pointCloudPLY: pointCloudPLY,
                 keyframes: keyframes,
                 scanLogJSON: scanLogJSON,
+                yoloObjectsJSON: yoloData,
                 deviceInfo: deviceInfo
             )
         } catch {

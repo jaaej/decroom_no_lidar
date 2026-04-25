@@ -62,4 +62,36 @@ struct ScanUploadPayloadTests {
         )
         #expect(decoded.frames[0].detections.isEmpty)
     }
+
+    @Test func encodeYoloObjectsPopulatedListProducesParseableJSON() throws {
+        let tracks = [
+            ObjectTrack(id: UUID(), category: "bed",
+                         latestPosition: SIMD3<Float>(2.0, 0.0, 1.5),
+                         bestConfidence: 0.87, bestFrameIndex: 34,
+                         observationCount: 12),
+            ObjectTrack(id: UUID(), category: "potted plant",
+                         latestPosition: SIMD3<Float>(0.3, 0.8, 2.9),
+                         bestConfidence: 0.62, bestFrameIndex: 67,
+                         observationCount: 5),
+        ]
+        let data = try ScanUploadPayload.encodeYoloObjects(tracks)
+        let decoded = try JSONDecoder().decode(
+            ScanUploadPayload.YoloObjectsManifest.self, from: data
+        )
+        #expect(decoded.objects.count == 2)
+        let bed = decoded.objects[0]
+        #expect(bed.category == "bed")
+        #expect(bed.position == [2.0, 0.0, 1.5])
+        #expect(bed.peak_confidence == 0.87)
+        #expect(bed.view_count == 12)
+        #expect(bed.best_frame_index == 34)
+    }
+
+    @Test func encodeYoloObjectsEmptyListSerializesAsEmptyArray() throws {
+        let data = try ScanUploadPayload.encodeYoloObjects([])
+        let decoded = try JSONDecoder().decode(
+            ScanUploadPayload.YoloObjectsManifest.self, from: data
+        )
+        #expect(decoded.objects.isEmpty)
+    }
 }
