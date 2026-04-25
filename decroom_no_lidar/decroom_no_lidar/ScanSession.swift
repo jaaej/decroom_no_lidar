@@ -64,6 +64,28 @@ final class ScanSession: ObservableObject {
     // the pool is exhausted and ARKit pauses frame delivery (~10s freezes).
     private var depthInFlight = false
 
+    /// Cached snapshot of the last depth inference. Written by the ML queue
+    /// after each depth inference; read by the ML queue before each YOLO
+    /// inference to unproject bbox centroids to world space.
+    /// Nil before the first depth result lands — YOLO drops detections
+    /// that arrive before depth has a chance.
+    private struct DepthSnapshot {
+        let depths: [Float]
+        let width: Int
+        let height: Int
+        let intrinsics: Intrinsics
+        let worldFromCamera: simd_float4x4
+    }
+    nonisolated(unsafe) private let snapshotQueue = DispatchQueue(label: "decroom.scan-session.depth-snapshot")
+    nonisolated(unsafe) private var _latestDepthSnapshot: DepthSnapshot?
+
+    nonisolated private func storeDepthSnapshot(_ snap: DepthSnapshot) {
+        snapshotQueue.sync { _latestDepthSnapshot = snap }
+    }
+    nonisolated private func latestDepthSnapshot() -> DepthSnapshot? {
+        snapshotQueue.sync { _latestDepthSnapshot }
+    }
+
     init() {
         self.logger = ScanLogger()
         logger.recordDevice(DeviceInfo.current())
@@ -277,6 +299,15 @@ final class ScanSession: ObservableObject {
             pixelStride: 8
         )
         let count = pointCloud.count
+
+        // Store a snapshot for YOLO unprojection on subsequent frames.
+        self.storeDepthSnapshot(DepthSnapshot(
+            depths: result.depths,
+            width: result.width,
+            height: result.height,
+            intrinsics: scaledIntrinsics,
+            worldFromCamera: pose
+        ))
 
         // Only the small coverage update hops to MainActor.
         Task { @MainActor [weak self] in
