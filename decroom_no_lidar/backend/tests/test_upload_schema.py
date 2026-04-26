@@ -105,3 +105,43 @@ def test_rejects_missing_frames_in_manifest():
         parse_payload(
             _valid_geom_bytes(), _valid_ply_bytes(), manifest, [], b"{}"
         )
+
+
+# ── Plan 3b: yolo_objects schema validation ──────────────────────────────────
+
+def test_rejects_malformed_yolo_objects_missing_required_field():
+    bad = json.dumps({"objects": [{"category": "bed"}]}).encode()
+    with pytest.raises(PhoneFirstSchemaError, match="yolo_objects"):
+        parse_payload(
+            _valid_geom_bytes(), _valid_ply_bytes(),
+            _valid_manifest_bytes(), [], b"{}", bad,
+        )
+
+
+def test_rejects_malformed_yolo_objects_bad_position_shape():
+    bad = json.dumps({"objects": [{
+        "category": "bed", "position": [1, 2],  # only 2 coords
+        "peak_confidence": 0.5, "view_count": 1, "best_frame_index": 0,
+    }]}).encode()
+    with pytest.raises(PhoneFirstSchemaError, match="position"):
+        parse_payload(
+            _valid_geom_bytes(), _valid_ply_bytes(),
+            _valid_manifest_bytes(), [], b"{}", bad,
+        )
+
+
+def test_rejects_yolo_objects_invalid_json():
+    with pytest.raises(PhoneFirstSchemaError, match="yolo_objects"):
+        parse_payload(
+            _valid_geom_bytes(), _valid_ply_bytes(),
+            _valid_manifest_bytes(), [], b"{}", b"{not json",
+        )
+
+
+def test_accepts_empty_yolo_objects_field():
+    """Empty/missing yolo_objects bytes is valid (Plan 3a tier devices)."""
+    p = parse_payload(
+        _valid_geom_bytes(), _valid_ply_bytes(),
+        _valid_manifest_bytes(), [], b"{}", b"",
+    )
+    assert p.yolo_objects == []
