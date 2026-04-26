@@ -291,3 +291,16 @@ def test_parse_payload_rejects_invalid_yolo_objects_json():
     room_geom, ply, manifest, log = _minimal_payload_parts()
     with pytest.raises(PhoneFirstSchemaError):
         parse_payload(room_geom, ply, manifest, [], log, b"{not json")
+
+
+def test_fixture_yolo_objects_parses_cleanly():
+    """Contract fixture: shared between iOS multipart tests and backend
+    parser. If either side changes the schema, this fails."""
+    import pathlib
+    fx = pathlib.Path(__file__).parent / "fixtures" / "phone_first_payload" / "yolo_objects.json"
+    raw = fx.read_bytes()
+
+    room_geom, ply, manifest, log = _minimal_payload_parts()
+    payload = parse_payload(room_geom, ply, manifest, [], log, raw)
+    assert len(payload.yolo_objects) == 3
+    assert {o["category"] for o in payload.yolo_objects} == {"bed", "chair", "potted plant"}
