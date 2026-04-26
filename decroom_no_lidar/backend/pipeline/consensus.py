@@ -362,3 +362,71 @@ def snap_to_walls(
         snapped["rotation_y"] = _wall_yaw(best_wall) + math.pi
         out.append(snapped)
     return out
+
+
+# ── Per-object confidence ────────────────────────────────────────────────────
+
+# Plausible size ranges per category (width_min, width_max,
+# length_min, length_max, height_min, height_max) in meters.
+_SIZE_PLAUSIBILITY: Dict[str, Tuple[float, float, float, float, float, float]] = {
+    "bed":          (1.2, 2.2, 1.9, 2.2, 0.3, 1.2),
+    "couch":        (1.5, 2.8, 0.8, 1.1, 0.7, 1.1),
+    "sofa":         (1.5, 2.8, 0.8, 1.1, 0.7, 1.1),
+    "chair":        (0.4, 0.7, 0.4, 0.7, 0.7, 1.2),
+    "dining_table": (0.9, 2.2, 0.7, 1.4, 0.65, 0.85),
+    "desk":         (0.9, 1.8, 0.5, 0.9, 0.65, 0.85),
+    "tv":           (0.8, 1.8, 0.05, 0.2, 0.45, 1.0),
+    "laptop":       (0.25, 0.45, 0.20, 0.35, 0.01, 0.05),
+    "lamp":         (0.15, 0.6, 0.15, 0.6, 0.3, 1.8),
+    "potted plant": (0.1, 0.7, 0.1, 0.7, 0.1, 1.5),
+    "dresser":      (0.6, 1.4, 0.35, 0.6, 0.7, 1.0),
+    "bookshelf":    (0.5, 1.5, 0.2, 0.5, 0.8, 2.2),
+}
+
+
+def _size_plausibility(obj: Dict[str, Any]) -> float:
+    m = obj.get("metadata", {})
+    w = float(m.get("width", 1.0))
+    l = float(m.get("length", 1.0))
+    h = float(m.get("height", 1.0))
+    rng = _SIZE_PLAUSIBILITY.get(obj.get("type", ""))
+    if rng is None:
+        # Unknown category — neutral-ish score (not full credit, not penalty).
+        return 0.7
+    w_min, w_max, l_min, l_max, h_min, h_max = rng
+    in_range = (w_min <= w <= w_max and l_min <= l <= l_max
+                and h_min <= h <= h_max)
+    return 1.0 if in_range else 0.3
+
+
+def _multi_view_score(yolo_matched: bool, yolo_view_count: int) -> float:
+    if not yolo_matched:
+        # No YOLO match → no multi-view evidence; use neutral default.
+        return 0.5
+    if yolo_view_count >= 3:
+        return 1.0
+    if yolo_view_count == 2:
+        return 0.7
+    if yolo_view_count == 1:
+        return 0.4
+    return 0.2
+
+
+def compute_confidence(
+    obj: Dict[str, Any],
+    agreement_score: float,
+    yolo_view_count: int,
+    yolo_matched: bool,
+) -> float:
+    """
+    confidence = 0.5 * agreement_score
+               + 0.3 * multi_view_score
+               + 0.2 * size_plausibility
+
+    Result clamped to [0, 1]. agreement_score clamped to [0, 1] before use.
+    """
+    a = max(0.0, min(1.0, agreement_score))
+    m = _multi_view_score(yolo_matched, yolo_view_count)
+    s = _size_plausibility(obj)
+    c = 0.5 * a + 0.3 * m + 0.2 * s
+    return max(0.0, min(1.0, c))
