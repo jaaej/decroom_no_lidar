@@ -151,6 +151,7 @@ async def upload_phone_first(
     keyframes_manifest: UploadFile = File(...),
     keyframes: List[UploadFile] = File(...),
     scan_log: UploadFile = File(...),
+    yolo_objects: Optional[UploadFile] = File(None),
 ):
     """Receive a phone-first upload: walls + PLY + keyframes + log.
     Runs SpatialLM on the phone PLY and returns a RoomPayload."""
@@ -171,11 +172,12 @@ async def upload_phone_first(
         manifest_bytes = await keyframes_manifest.read()
         keyframe_bytes = [await kf.read() for kf in keyframes]
         log_bytes = await scan_log.read() if scan_log is not None else b""
+        yolo_bytes = await yolo_objects.read() if yolo_objects is not None else b""
 
         try:
             payload = parse_payload(
                 room_geom_bytes, ply_bytes, manifest_bytes,
-                keyframe_bytes, log_bytes,
+                keyframe_bytes, log_bytes, yolo_bytes,
             )
         except PhoneFirstSchemaError as e:
             logger.warning("Phone-first payload rejected: %s", e)

@@ -11,9 +11,11 @@ import pytest
 from pipeline.phone_first_pipeline import (
     EXPECTED_COORDINATE_SYSTEM,
     PhoneFirstPayload,
+    PhoneFirstSchemaError,
     dimensions_from_point_cloud,
     load_ply_points,
     map_spatiallm_objects_to_room_objects,
+    parse_payload,
     room_envelope_from_walls,
     run_phone_first_pipeline,
 )
@@ -230,3 +232,62 @@ def test_room_envelope_prefers_smaller_when_moderate_disagreement():
     # Length: anchor=4.0, cloud=~3.4, diff=~15% -> smaller wins -> ~3.4
     assert info.width_m < 3.8, f"width={info.width_m} should prefer smaller"
     assert info.length_m < 3.8, f"length={info.length_m} should prefer smaller"
+
+
+# ── Plan 3b: yolo_objects payload parsing ────────────────────────────────────
+
+def _minimal_payload_parts():
+    """Helper: returns the bytes for the 5 base multipart parts (no yolo_objects)."""
+    room_geom = json.dumps({
+        "walls": [], "floor_height": 0.0, "ceiling_height": 2.5,
+        "manhattan_yaw": 0.0,
+        "coordinate_system": EXPECTED_COORDINATE_SYSTEM,
+    }).encode()
+    ply = b"ply\nformat binary_little_endian 1.0\nelement vertex 0\nend_header\n"
+    manifest = json.dumps({"frames": []}).encode()
+    log = b"{}"
+    return room_geom, ply, manifest, log
+
+
+def test_parse_payload_accepts_yolo_objects_json():
+    room_geom, ply, manifest, log = _minimal_payload_parts()
+    yolo = json.dumps({
+        "objects": [
+            {"category": "bed", "position": [1, 0, 2],
+             "peak_confidence": 0.9, "view_count": 5, "best_frame_index": 3}
+        ]
+    }).encode()
+
+    payload = parse_payload(room_geom, ply, manifest, [], log, yolo)
+    assert len(payload.yolo_objects) == 1
+    assert payload.yolo_objects[0]["category"] == "bed"
+    assert payload.yolo_objects[0]["position"] == [1, 0, 2]
+
+
+def test_parse_payload_allows_missing_yolo_objects_as_empty():
+    room_geom, ply, manifest, log = _minimal_payload_parts()
+    payload = parse_payload(room_geom, ply, manifest, [], log, b"")
+    assert payload.yolo_objects == []
+
+
+def test_parse_payload_rejects_yolo_object_missing_required_field():
+    room_geom, ply, manifest, log = _minimal_payload_parts()
+    bad = json.dumps({"objects": [{"category": "bed"}]}).encode()
+    with pytest.raises(PhoneFirstSchemaError):
+        parse_payload(room_geom, ply, manifest, [], log, bad)
+
+
+def test_parse_payload_rejects_yolo_objects_wrong_position_length():
+    room_geom, ply, manifest, log = _minimal_payload_parts()
+    bad = json.dumps({"objects": [{
+        "category": "bed", "position": [1, 0],  # missing z
+        "peak_confidence": 0.5, "view_count": 1, "best_frame_index": 0,
+    }]}).encode()
+    with pytest.raises(PhoneFirstSchemaError):
+        parse_payload(room_geom, ply, manifest, [], log, bad)
+
+
+def test_parse_payload_rejects_invalid_yolo_objects_json():
+    room_geom, ply, manifest, log = _minimal_payload_parts()
+    with pytest.raises(PhoneFirstSchemaError):
+        parse_payload(room_geom, ply, manifest, [], log, b"{not json")

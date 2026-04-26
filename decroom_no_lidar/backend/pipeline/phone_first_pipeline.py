@@ -22,7 +22,7 @@ import sys
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -74,6 +74,9 @@ class PhoneFirstPayload:
     keyframes_manifest: Dict[str, Any]
     keyframe_jpegs: List[bytes]
     scan_log: Dict[str, Any]
+    # Plan 3b: deduped 3D-tracked objects from on-device ObjectTracker.
+    # Optional in 3a (default empty list); required-shape when present.
+    yolo_objects: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def parse_payload(
@@ -82,6 +85,7 @@ def parse_payload(
     keyframes_manifest: bytes,
     keyframe_jpegs: List[bytes],
     scan_log: bytes,
+    yolo_objects: bytes = b"",
 ) -> PhoneFirstPayload:
     """Parse multipart parts. Raises PhoneFirstSchemaError on any malformity."""
     try:
@@ -115,12 +119,40 @@ def parse_payload(
     except Exception as e:
         raise PhoneFirstSchemaError(f"scan_log.json invalid: {e}")
 
+    yolo_list: List[Dict[str, Any]] = []
+    if yolo_objects:
+        try:
+            yolo_doc = json.loads(yolo_objects.decode("utf-8"))
+        except Exception as e:
+            raise PhoneFirstSchemaError(f"yolo_objects.json invalid: {e}")
+        if not isinstance(yolo_doc, dict) or "objects" not in yolo_doc:
+            raise PhoneFirstSchemaError("yolo_objects.json missing 'objects'")
+        raw = yolo_doc["objects"]
+        if not isinstance(raw, list):
+            raise PhoneFirstSchemaError("yolo_objects.objects must be list")
+        for i, o in enumerate(raw):
+            if not isinstance(o, dict):
+                raise PhoneFirstSchemaError(f"yolo_objects[{i}] not an object")
+            for required in ("category", "position", "peak_confidence",
+                              "view_count", "best_frame_index"):
+                if required not in o:
+                    raise PhoneFirstSchemaError(
+                        f"yolo_objects[{i}] missing {required}"
+                    )
+            pos = o["position"]
+            if not isinstance(pos, list) or len(pos) != 3:
+                raise PhoneFirstSchemaError(
+                    f"yolo_objects[{i}].position must be [x,y,z]"
+                )
+        yolo_list = raw
+
     return PhoneFirstPayload(
         room_geometry=geom,
         point_cloud_ply=point_cloud_ply,
         keyframes_manifest=manifest,
         keyframe_jpegs=keyframe_jpegs,
         scan_log=log,
+        yolo_objects=yolo_list,
     )
 
 
