@@ -266,3 +266,99 @@ def collapse_duplicates(objects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             break
         del current[dropped]
     return current
+
+
+# ── Wall snapping ────────────────────────────────────────────────────────────
+
+# Per-category snap-to-wall tolerances (meters). Categories not in either
+# table get no snap.
+SNAP_TO_WALL_CATEGORIES: Dict[str, float] = {
+    "bed": 0.8,
+    "dresser": 0.8,
+    "wardrobe": 0.8,
+    "sofa": 0.8,
+    "couch": 0.8,
+    "bookshelf": 0.8,
+    "desk": 0.8,
+    "nightstand": 0.5,
+    "tv": 0.8,
+}
+FREESTANDING_CATEGORIES = {
+    "chair", "stool", "dining_table", "coffee_table", "side_table",
+    "lamp", "lamp_floor", "lamp_desk", "potted plant", "rug", "poster",
+    "laptop",
+}
+
+
+def _project_point_onto_segment(
+    px: float, pz: float,
+    x0: float, z0: float,
+    x1: float, z1: float,
+) -> Tuple[float, float, float]:
+    """Project (px, pz) onto segment (x0,z0)→(x1,z1). Returns
+    (projected_x, projected_z, perpendicular_distance)."""
+    dx, dz = x1 - x0, z1 - z0
+    seg_len_sq = dx * dx + dz * dz
+    if seg_len_sq <= 1e-8:
+        return (x0, z0, math.sqrt((px - x0) ** 2 + (pz - z0) ** 2))
+    t = ((px - x0) * dx + (pz - z0) * dz) / seg_len_sq
+    t = max(0.0, min(1.0, t))
+    qx, qz = x0 + t * dx, z0 + t * dz
+    d = math.sqrt((px - qx) ** 2 + (pz - qz) ** 2)
+    return (qx, qz, d)
+
+
+def _wall_yaw(wall: Dict[str, Any]) -> float:
+    s, e = wall["start"], wall["end"]
+    return math.atan2(e["x"] - s["x"], e["z"] - s["z"])
+
+
+def snap_to_walls(
+    objects: List[Dict[str, Any]],
+    walls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Snap each applicable object to the nearest wall within its category
+    tolerance. Freestanding categories pass through unchanged. Objects
+    beyond tolerance stay at their input position."""
+    if not walls:
+        return list(objects)
+
+    out: List[Dict[str, Any]] = []
+    for obj in objects:
+        cat = obj.get("type", "")
+        if cat in FREESTANDING_CATEGORIES:
+            out.append(obj)
+            continue
+        tol = SNAP_TO_WALL_CATEGORIES.get(cat)
+        if tol is None:
+            out.append(obj)
+            continue
+
+        ox = obj["position"]["x"]
+        oz = obj["position"]["z"]
+
+        best_qx = best_qz = 0.0
+        best_d = float("inf")
+        best_wall: Dict[str, Any] | None = None
+        for w in walls:
+            qx, qz, d = _project_point_onto_segment(
+                ox, oz,
+                w["start"]["x"], w["start"]["z"],
+                w["end"]["x"], w["end"]["z"],
+            )
+            if d < best_d:
+                best_d = d
+                best_qx, best_qz = qx, qz
+                best_wall = w
+
+        if best_wall is None or best_d > tol:
+            out.append(obj)
+            continue
+
+        snapped = dict(obj)
+        snapped["position"] = {"x": best_qx, "y": obj["position"]["y"],
+                                 "z": best_qz}
+        # Face into the room: wall_yaw + pi.
+        snapped["rotation_y"] = _wall_yaw(best_wall) + math.pi
+        out.append(snapped)
+    return out
