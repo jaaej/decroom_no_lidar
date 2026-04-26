@@ -92,3 +92,71 @@ def test_empty_inputs_returns_empty():
 def test_match_distance_constants_exist():
     # Sanity check the public constants the test relies on.
     assert POSITION_MATCH_DISTANCE_LARGE > POSITION_MATCH_DISTANCE_SMALL
+
+
+# ── collapse_duplicates ──────────────────────────────────────────────────────
+
+def test_collapse_duplicates_two_beds_close_collapses_to_one():
+    from pipeline.consensus import collapse_duplicates
+    objs = [
+        {"id": "a", "type": "bed", "position": {"x": 2.0, "y": 0, "z": 1.5},
+         "metadata": {}, "_confidence": 0.9},
+        {"id": "b", "type": "bed", "position": {"x": 2.3, "y": 0, "z": 1.7},
+         "metadata": {}, "_confidence": 0.7},
+    ]
+    out = collapse_duplicates(objs)
+    assert len(out) == 1
+    assert out[0]["id"] == "a"  # higher confidence wins
+
+
+def test_collapse_duplicates_two_beds_far_apart_both_kept():
+    from pipeline.consensus import collapse_duplicates
+    objs = [
+        {"id": "a", "type": "bed", "position": {"x": 2.0, "y": 0, "z": 1.5},
+         "metadata": {}, "_confidence": 0.9},
+        {"id": "b", "type": "bed", "position": {"x": 5.0, "y": 0, "z": 1.5},
+         "metadata": {}, "_confidence": 0.8},
+    ]
+    out = collapse_duplicates(objs)
+    assert len(out) == 2
+
+
+def test_collapse_duplicates_preserves_different_categories():
+    from pipeline.consensus import collapse_duplicates
+    objs = [
+        {"id": "a", "type": "bed", "position": {"x": 2.0, "y": 0, "z": 1.5},
+         "metadata": {}, "_confidence": 0.9},
+        {"id": "b", "type": "chair", "position": {"x": 2.0, "y": 0, "z": 1.5},
+         "metadata": {}, "_confidence": 0.9},
+    ]
+    out = collapse_duplicates(objs)
+    assert len(out) == 2  # different categories don't collapse
+
+
+def test_collapse_duplicates_three_chairs_transitively_collapse():
+    from pipeline.consensus import collapse_duplicates
+    # chairs at (0,0), (0.4,0), (0.8,0) — pairwise within 0.65m
+    objs = [
+        {"id": "a", "type": "chair", "position": {"x": 0.0, "y": 0, "z": 0},
+         "metadata": {}, "_confidence": 0.8},
+        {"id": "b", "type": "chair", "position": {"x": 0.4, "y": 0, "z": 0},
+         "metadata": {}, "_confidence": 0.9},
+        {"id": "c", "type": "chair", "position": {"x": 0.8, "y": 0, "z": 0},
+         "metadata": {}, "_confidence": 0.7},
+    ]
+    out = collapse_duplicates(objs)
+    # Iterating until stable: should end at 1 chair (b, highest conf).
+    assert len(out) == 1
+    assert out[0]["id"] == "b"
+
+
+def test_collapse_duplicates_empty_input_returns_empty():
+    from pipeline.consensus import collapse_duplicates
+    assert collapse_duplicates([]) == []
+
+
+def test_collapse_duplicates_single_input_unchanged():
+    from pipeline.consensus import collapse_duplicates
+    o = [{"id": "x", "type": "bed", "position": {"x": 0, "y": 0, "z": 0},
+           "metadata": {}, "_confidence": 0.5}]
+    assert collapse_duplicates(o) == o

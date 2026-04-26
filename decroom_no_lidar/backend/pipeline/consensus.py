@@ -197,3 +197,72 @@ def consensus_merge(
         agreement[obj["id"]] = 0.5
 
     return merged, agreement
+
+
+# ── Duplicate collapse ───────────────────────────────────────────────────────
+
+# Per-category merge distances for duplicate collapse (meters). Tuned so a
+# real room rarely has two of the same category within these distances.
+# No hardcoded instance caps — rooms can legitimately have N beds (hostel),
+# N chairs (kitchen), etc.
+MERGE_DISTANCE_BY_CATEGORY: Dict[str, float] = {
+    "bed": 1.5,
+    "couch": 1.5,
+    "sofa": 1.5,
+    "chair": 0.65,
+    "dining_table": 1.1,
+    "desk": 1.1,
+    "tv": 0.8,
+    "laptop": 0.5,
+    "lamp": 0.5,
+    "potted plant": 0.6,
+    "bookshelf": 1.2,
+    "dresser": 1.2,
+}
+_DEFAULT_MERGE_DISTANCE = 0.6
+
+
+def _merge_distance_for(category: str) -> float:
+    return MERGE_DISTANCE_BY_CATEGORY.get(category, _DEFAULT_MERGE_DISTANCE)
+
+
+def _pos_tuple(obj: Dict[str, Any]) -> Tuple[float, float, float]:
+    p = obj.get("position", {})
+    return (float(p.get("x", 0)), float(p.get("y", 0)), float(p.get("z", 0)))
+
+
+def _confidence_of(obj: Dict[str, Any]) -> float:
+    return float(obj.get("_confidence", obj.get("confidence", 0.5)))
+
+
+def collapse_duplicates(objects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Position-based duplicate collapse within each category.
+
+    Iterates: find any pair of same-category objects within the category's
+    merge distance; drop the lower-confidence one. Continues until no
+    such pair remains. No instance caps — all surviving objects are kept.
+    """
+    current = list(objects)
+    while True:
+        dropped: int | None = None
+        for i in range(len(current)):
+            for j in range(i + 1, len(current)):
+                a, b = current[i], current[j]
+                if a.get("type") != b.get("type"):
+                    continue
+                thresh = _merge_distance_for(a.get("type", ""))
+                if _distance_xyz(_pos_tuple(a), _pos_tuple(b)) > thresh:
+                    continue
+                # Pair within tolerance — drop lower-confidence member.
+                if _confidence_of(b) > _confidence_of(a):
+                    dropped = i
+                else:
+                    dropped = j
+                break
+            if dropped is not None:
+                break
+        if dropped is None:
+            break
+        del current[dropped]
+    return current
