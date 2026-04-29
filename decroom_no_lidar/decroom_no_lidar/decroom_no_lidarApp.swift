@@ -10,11 +10,24 @@ import SwiftUI
 @main
 struct decroom_no_lidarApp: App {
     @StateObject private var roomStore = RoomStore()
+    @State private var didFinishSplash = false
 
     var body: some Scene {
         WindowGroup {
-            MainTabView()
-                .environmentObject(roomStore)
+            ZStack {
+                MainTabView()
+                    .environmentObject(roomStore)
+                    .opacity(didFinishSplash ? 1 : 0)
+
+                if !didFinishSplash {
+                    SplashView {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            didFinishSplash = true
+                        }
+                    }
+                    .transition(.opacity)
+                }
+            }
         }
     }
 }

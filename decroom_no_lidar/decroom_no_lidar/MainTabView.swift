@@ -2,19 +2,20 @@
 //  MainTabView.swift
 //  decroom_no_lidar
 //
-//  Created by Jae Jeon on 29/11/2025.
+//  5-tab cream tab bar. Center scan button routes to the existing
+//  CaptureFlowView; top/leaderboard remains a placeholder; settings
+//  is reached via the gear icon on Home, not the bar.
 //
 
 import SwiftUI
 
 struct MainTabView: View {
-    @State private var selectedTab = 0
-    @State private var showTabBar = true
+    @State private var selectedTab: Int = 0
+    @State private var showTabBar: Bool = true
     @State private var initialScanMode: ScanMode = .video
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Content area
             Group {
                 switch selectedTab {
                 case 0:
@@ -23,129 +24,184 @@ struct MainTabView: View {
                         selectedTab = 2
                     })
                 case 1:
-                    PlaceholderView(title: "Achievements", icon: "trophy.fill") { selectedTab = 0 }
+                    ExploreView()
                 case 2:
                     CaptureFlowView(goHome: { selectedTab = 0 }, initialMode: initialScanMode)
                 case 3:
-                    PlaceholderView(title: "Settings", icon: "gearshape.fill") { selectedTab = 0 }
+                    TopPlaceholderView()
                 case 4:
-                    PlaceholderView(title: "Profile", icon: "person.fill") { selectedTab = 0 }
+                    ProfileView()
                 default:
                     HomeView(showTabBar: $showTabBar)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+            .animation(.easeOut(duration: 0.26), value: selectedTab)
 
-            // Custom tab bar — only visible on the home screen (not in detail views)
-            if selectedTab == 0 && showTabBar {
+            if showTabBar && selectedTab != 2 {
                 customTabBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .ignoresSafeArea(.keyboard)
+        .background(DR.cream)
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showTabBar)
     }
 
-    // MARK: - Custom Tab Bar
+    // MARK: - Tab bar
 
     private var customTabBar: some View {
-        HStack(spacing: 0) {
-            // Tab 0: Home (smiley)
-            tabButton(icon: "face.smiling", index: 0)
+        ZStack(alignment: .bottom) {
+            // Cream paper background with soft fade-in from above
+            LinearGradient(
+                colors: [DR.cream.opacity(0), DR.cream],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .frame(height: 48)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .allowsHitTesting(false)
 
-            // Tab 1: Achievements (trophy)
-            tabButton(icon: "trophy.fill", index: 1)
-
-            // Tab 2: Record (center red button)
-            Button {
-                initialScanMode = .video
-                selectedTab = 2
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(selectedTab == 2 ? Color.red : Color(red: 0.85, green: 0.3, blue: 0.3))
-                        .frame(width: 56, height: 56)
-                        .shadow(color: .red.opacity(0.3), radius: 6, y: 3)
-
-                    Circle()
-                        .fill(Color.red.opacity(0.8))
-                        .frame(width: 44, height: 44)
-                }
-                .offset(y: -8)
+            HStack(spacing: 0) {
+                tabGlyph(icon: "house",       label: "Home",    index: 0)
+                tabGlyph(icon: "magnifyingglass", label: "Explore", index: 1)
+                scanButton
+                tabGlyph(icon: "trophy",      label: "Top",     index: 3)
+                tabGlyph(icon: "person.crop.circle", label: "You", index: 4)
             }
-            .frame(maxWidth: .infinity)
-
-            // Tab 3: Settings (gear)
-            tabButton(icon: "gearshape.fill", index: 3)
-
-            // Tab 4: Profile (person)
-            tabButton(icon: "person.circle", index: 4)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 20)
+            .frame(height: 88, alignment: .bottom)
+            .background(
+                DR.paper.ignoresSafeArea(edges: .bottom)
+                    .opacity(0.0001) // hit area, transparent
+            )
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 20)
+        .frame(height: 88)
         .background(
-            Color.white
-                .shadow(color: .black.opacity(0.08), radius: 8, y: -2)
-                .ignoresSafeArea(edges: .bottom)
+            DR.paper.opacity(0.98).ignoresSafeArea(edges: .bottom)
         )
     }
 
-    private func tabButton(icon: String, index: Int) -> some View {
-        Button {
-            selectedTab = index
+    private func tabGlyph(icon: String, label: String, index: Int) -> some View {
+        let active = selectedTab == index
+        return Button {
+            withAnimation(.easeOut(duration: 0.2)) { selectedTab = index }
         } label: {
-            Image(systemName: icon)
-                .font(.system(size: 22))
-                .foregroundStyle(selectedTab == index ? .black : Color(.darkGray).opacity(0.5))
-                .frame(maxWidth: .infinity)
-                .frame(height: 36)
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: active ? .semibold : .regular))
+                    .foregroundStyle(active ? DR.indigo : DR.ink3)
+                Text(label)
+                    .font(DR.sans(10.5, weight: active ? .semibold : .medium))
+                    .tracking(0.1)
+                    .foregroundStyle(active ? DR.indigo : DR.ink3)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var scanButton: some View {
+        Button {
+            initialScanMode = .video
+            withAnimation(.easeOut(duration: 0.2)) { selectedTab = 2 }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(DR.ink)
+                    .frame(width: 62, height: 62)
+                    .overlay(
+                        // 4px cream paper ring (matches border: 4px solid var(--paper))
+                        Circle()
+                            .stroke(DR.paper, lineWidth: 4)
+                    )
+                    .shadow(color: DR.ink.opacity(0.25), radius: 12, y: 6)
+
+                Circle()
+                    .stroke(DR.cream.opacity(0.5), lineWidth: 1.5)
+                    .frame(width: 50, height: 50)
+
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(DR.cream)
+            }
+            .offset(y: -14)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - "Top" leaderboard placeholder
+
+struct TopPlaceholderView: View {
+    var body: some View {
+        ZStack {
+            DR.cream.ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Spacer()
+                ZStack {
+                    Circle().stroke(DR.indigo.opacity(0.4), lineWidth: 1).frame(width: 96, height: 96)
+                    Image(systemName: "trophy")
+                        .font(.system(size: 28, weight: .regular))
+                        .foregroundStyle(DR.indigo)
+                }
+                VStack(spacing: 6) {
+                    DREyebrow(text: "TOP / SOON")
+                    Text("Leaderboard")
+                        .font(DR.serif(28))
+                        .foregroundStyle(DR.ink)
+                    Text("Ranked rooms and creators land here.")
+                        .font(DR.sans(13))
+                        .foregroundStyle(DR.ink3)
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 }
 
-// MARK: - Placeholder View
-
+// Backwards-compat for any older code that still spins up `PlaceholderView`.
 struct PlaceholderView: View {
     let title: String
     let icon: String
     let goHome: () -> Void
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color(red: 0.38, green: 0.45, blue: 0.95)
-                .ignoresSafeArea()
-
-            VStack(spacing: 16) {
+        ZStack {
+            DR.cream.ignoresSafeArea()
+            VStack(spacing: 18) {
                 Spacer()
-
                 Image(systemName: icon)
-                    .font(.system(size: 56))
-                    .foregroundStyle(.white.opacity(0.4))
-
+                    .font(.system(size: 56, weight: .regular))
+                    .foregroundStyle(DR.indigo.opacity(0.5))
                 Text(title)
-                    .font(.title2)
-                    .bold()
-                    .foregroundStyle(.white)
-
+                    .font(DR.serif(28))
+                    .foregroundStyle(DR.ink)
                 Text("Coming soon")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
-
+                    .font(DR.sans(13))
+                    .foregroundStyle(DR.ink3)
                 Spacer()
             }
-            .frame(maxWidth: .infinity)
-
-            // Back button
-            Button(action: goHome) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text("Home")
-                        .font(.body)
+            .overlay(alignment: .topLeading) {
+                Button(action: goHome) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Home")
+                            .font(DR.sans(13, weight: .medium))
+                    }
+                    .foregroundStyle(DR.ink2)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(DR.cream2, in: Capsule())
                 }
-                .foregroundStyle(.white)
+                .padding(.leading, 16).padding(.top, 56)
             }
-            .padding(.leading, 16)
-            .padding(.top, 56)
         }
     }
 }
