@@ -481,6 +481,21 @@ def _run_spatiallm_on_phone_ply(
     # Convert to SpatialLM Z-up coords.
     slm_points, coord_offset = arkit_to_spatiallm_coords(positions)
 
+    # Subsample if the phone sent too many points. SpatialLM's voxel encoder
+    # crashes (Floating point exception / CUDA kernel failure) on inputs
+    # > ~250K. Phone caps at 500K, which is too much; random-subsample to
+    # 200K here so the pipeline survives. Override via env if needed.
+    max_points = int(os.getenv("DECROOM_SPATIALLM_MAX_POINTS", "200000"))
+    if len(slm_points) > max_points:
+        rng = np.random.default_rng(seed=0)
+        idx = rng.choice(len(slm_points), max_points, replace=False)
+        slm_points = slm_points[idx]
+        colors = colors[idx]
+        logger.info(
+            "Subsampled point cloud %d -> %d for SpatialLM",
+            len(positions), max_points,
+        )
+
     # Set confidence the parser will stamp on each object.
     confidence = float(getattr(cfg, "spatiallm_confidence", 0.85))
     parse_spatiallm_output._confidence = confidence
@@ -492,7 +507,19 @@ def _run_spatiallm_on_phone_ply(
     if raw_text is None:
         raise RuntimeError("SpatialLM: inference returned no output")
 
+    # PLAN 3B B0 PROBE — capture raw SLM text for door/window format check.
+    # Remove these two writes once Task 8 is signed off.
+    import pathlib as _p
+    _p.Path("/tmp/decroom_b0_raw_slm.txt").write_text(raw_text or "")
+
     layout, objects = parse_spatiallm_output(raw_text, coord_offset)
+
+    # PLAN 3B B0 PROBE — capture parsed output too.
+    import json as _j
+    _p.Path("/tmp/decroom_b0_parsed_slm.json").write_text(
+        _j.dumps({"layout": layout, "objects": objects}, default=str, indent=2)
+    )
+
     return layout, objects
 
 
