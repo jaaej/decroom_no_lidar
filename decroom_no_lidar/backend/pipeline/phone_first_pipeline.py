@@ -509,7 +509,19 @@ def _run_spatiallm_on_phone_ply(
     if raw_text is None:
         raise RuntimeError("SpatialLM: inference returned no output")
 
+    # B0 PROBES (re-enabled for follow-up debugging) — capture raw SLM
+    # output and parsed layout to /tmp so we can see why bboxes aren't
+    # showing up on real-room scans. Remove once Task 18 QA passes.
+    import pathlib as _p
+    _p.Path("/tmp/decroom_b0_raw_slm.txt").write_text(raw_text or "")
+
     layout, objects = parse_spatiallm_output(raw_text, coord_offset)
+
+    import json as _j
+    _p.Path("/tmp/decroom_b0_parsed_slm.json").write_text(
+        _j.dumps({"layout": layout, "objects": objects}, default=str, indent=2)
+    )
+
     return layout, objects
 
 
