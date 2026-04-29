@@ -507,19 +507,7 @@ def _run_spatiallm_on_phone_ply(
     if raw_text is None:
         raise RuntimeError("SpatialLM: inference returned no output")
 
-    # PLAN 3B B0 PROBE — capture raw SLM text for door/window format check.
-    # Remove these two writes once Task 8 is signed off.
-    import pathlib as _p
-    _p.Path("/tmp/decroom_b0_raw_slm.txt").write_text(raw_text or "")
-
     layout, objects = parse_spatiallm_output(raw_text, coord_offset)
-
-    # PLAN 3B B0 PROBE — capture parsed output too.
-    import json as _j
-    _p.Path("/tmp/decroom_b0_parsed_slm.json").write_text(
-        _j.dumps({"layout": layout, "objects": objects}, default=str, indent=2)
-    )
-
     return layout, objects
 
 

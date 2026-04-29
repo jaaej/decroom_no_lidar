@@ -531,6 +531,14 @@ _BBOX_RE = re.compile(
     r"([+-]?[\d.]+)\s*,\s*([+-]?[\d.]+)\s*,\s*([+-]?[\d.]+)\s*\)"
 )
 
+# Door / Window entries reference their attached wall by id.
+# Format observed in raw SpatialLM output (see B0 verification 2026-04-29):
+#   door_0=Door(wall_5, x, y, z, width, height)
+#   window_0=Window(wall_0, x, y, z, width, height)
+# All we need for has_door / has_window is the wall_id reference.
+_DOOR_RE = re.compile(r"door_\d+=Door\(\s*(wall_\d+)\s*,")
+_WINDOW_RE = re.compile(r"window_\d+=Window\(\s*(wall_\d+)\s*,")
+
 
 def parse_spatiallm_output(
     text: str,
@@ -544,8 +552,14 @@ def parse_spatiallm_output(
     """
     walls_raw = _WALL_RE.findall(text)
     bboxes_raw = _BBOX_RE.findall(text)
+    door_wall_ids = set(_DOOR_RE.findall(text))
+    window_wall_ids = set(_WINDOW_RE.findall(text))
 
-    logger.info("SpatialLM parse: %d walls, %d bboxes", len(walls_raw), len(bboxes_raw))
+    logger.info(
+        "SpatialLM parse: %d walls, %d bboxes, %d doors, %d windows",
+        len(walls_raw), len(bboxes_raw),
+        len(door_wall_ids), len(window_wall_ids),
+    )
 
     # ── Parse walls ──
     walls = []
@@ -560,13 +574,14 @@ def parse_spatiallm_output(
         arkit_a = spatiallm_to_arkit_coords(slm_a, coord_offset)[0]
         arkit_b = spatiallm_to_arkit_coords(slm_b, coord_offset)[0]
 
+        wall_id = f"wall_{i}"
         # Project to XZ floor plane (ARKit convention)
         walls.append({
-            "id": f"wall_{i}",
+            "id": wall_id,
             "start": [round(float(arkit_a[0]), 4), round(float(arkit_a[2]), 4)],
             "end": [round(float(arkit_b[0]), 4), round(float(arkit_b[2]), 4)],
-            "has_window": False,
-            "has_door": False,
+            "has_window": wall_id in window_wall_ids,
+            "has_door": wall_id in door_wall_ids,
         })
         wall_heights.append(height)
         all_wall_pts_arkit.extend([arkit_a, arkit_b])
