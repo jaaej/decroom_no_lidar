@@ -360,6 +360,8 @@ def room_envelope_from_walls(
             id=f"w{i}",
             start=[w["start"]["x"], w["start"]["z"]],
             end=[w["end"]["x"], w["end"]["z"]],
+            has_door=bool(w.get("has_door", False)),
+            has_window=bool(w.get("has_window", False)),
         )
         for i, w in enumerate(walls)
     ]
@@ -511,6 +513,151 @@ def _run_spatiallm_on_phone_ply(
     return layout, objects
 
 
+# ── Plan 3b: door/window propagation + consensus pipeline ───────────────────
+
+def _segment_midpoint(start: Any, end: Any) -> Tuple[float, float]:
+    """Accepts {x,z} dict or [x,z] list. Returns (x, z) midpoint."""
+    if isinstance(start, dict):
+        sx, sz = float(start.get("x", 0)), float(start.get("z", 0))
+    else:
+        sx, sz = float(start[0]), float(start[1])
+    if isinstance(end, dict):
+        ex, ez = float(end.get("x", 0)), float(end.get("z", 0))
+    else:
+        ex, ez = float(end[0]), float(end[1])
+    return ((sx + ex) / 2, (sz + ez) / 2)
+
+
+def _attach_openings_from_slm_walls(
+    phone_walls: List[Dict[str, Any]],
+    slm_walls: List[Dict[str, Any]],
+    match_distance: float = 0.6,
+) -> List[Dict[str, Any]]:
+    """For each phone wall, set has_door / has_window if any SLM wall with
+    those flags has its midpoint within `match_distance` of the phone
+    wall's midpoint. Returns a new list (does not mutate inputs).
+    """
+    out = [dict(w, has_door=False, has_window=False) for w in phone_walls]
+    if not slm_walls:
+        return out
+
+    phone_mids = [
+        _segment_midpoint(w["start"], w["end"]) for w in out
+    ]
+
+    for sw in slm_walls:
+        if not (sw.get("has_door") or sw.get("has_window")):
+            continue
+        smx, smz = _segment_midpoint(sw["start"], sw["end"])
+        # Find nearest phone wall midpoint.
+        best_i = -1
+        best_d = float("inf")
+        for i, (pmx, pmz) in enumerate(phone_mids):
+            d = math.sqrt((smx - pmx) ** 2 + (smz - pmz) ** 2)
+            if d < best_d:
+                best_d = d
+                best_i = i
+        if best_i >= 0 and best_d <= match_distance:
+            if sw.get("has_door"):
+                out[best_i]["has_door"] = True
+            if sw.get("has_window"):
+                out[best_i]["has_window"] = True
+        else:
+            logger.info(
+                "SLM opening at (%.2f, %.2f) had no phone wall within %.2fm",
+                smx, smz, match_distance,
+            )
+    return out
+
+
+def _build_final_objects(
+    slm_objects: List[Any],
+    yolo_objects_3d: List[Dict[str, Any]],
+    phone_walls: List[Dict[str, Any]],
+) -> List[RoomObject]:
+    """Run consensus_merge → collapse_duplicates → snap_to_walls →
+    compute_confidence on the SLM objects + phone YOLO objects, return
+    the final RoomObject list."""
+    from .consensus import (
+        compute_confidence,
+        collapse_duplicates,
+        consensus_merge,
+        snap_to_walls,
+    )
+
+    # Map SLM raw objects through the existing category mapping first.
+    slm_mapped = map_spatiallm_objects_to_room_objects(slm_objects or [])
+    # Convert mapped RoomObjects to consensus dict shape.
+    slm_dicts = [
+        {
+            "id": o.id,
+            "type": o.type,
+            "position": {
+                "x": o.position.x, "y": o.position.y, "z": o.position.z,
+            },
+            "rotation_y": o.rotation_y,
+            "metadata": {
+                "width": o.metadata.width,
+                "length": o.metadata.length,
+                "height": o.metadata.height,
+            },
+            "_confidence": o.confidence,
+        }
+        for o in slm_mapped
+    ]
+
+    merged, agreement = consensus_merge(yolo_objects_3d, slm_dicts, phone_walls)
+    merged = collapse_duplicates(merged)
+    merged = snap_to_walls(merged, phone_walls)
+
+    # Best-effort YOLO view-count match for confidence.
+    def _yolo_match(mobj: Dict[str, Any]) -> Tuple[bool, int]:
+        mx = mobj["position"]["x"]
+        mz = mobj["position"]["z"]
+        best_d, best_vc, matched = float("inf"), 0, False
+        for y in yolo_objects_3d:
+            yx, _, yz = y["position"]
+            if y.get("category") != mobj.get("type"):
+                continue
+            d = math.sqrt((yx - mx) ** 2 + (yz - mz) ** 2)
+            if d < best_d:
+                best_d = d
+                best_vc = int(y.get("view_count", 0))
+                matched = True
+        return matched, best_vc
+
+    final: List[RoomObject] = []
+    for m in merged:
+        yolo_matched, yolo_vc = _yolo_match(m)
+        conf = compute_confidence(
+            m,
+            agreement_score=agreement.get(m["id"], 0.5),
+            yolo_view_count=yolo_vc,
+            yolo_matched=yolo_matched,
+        )
+        final.append(RoomObject(
+            id=m["id"],
+            type=m["type"],
+            asset_id=f"kenney_{m['type']}",
+            position=ObjectPosition(
+                x=m["position"]["x"],
+                y=m["position"]["y"],
+                z=m["position"]["z"],
+            ),
+            rotation_y=m.get("rotation_y", 0.0),
+            scale=1.0,
+            confidence=conf,
+            metadata=ObjectMetadata(
+                width=m["metadata"].get("width", 1.0),
+                length=m["metadata"].get("length", 1.0),
+                height=m["metadata"].get("height", 1.0),
+                inferred=True,
+                support_views=None,
+            ),
+        ))
+    return final
+
+
 # ── Main entry point (called from main.py route) ─────────────────────────────
 
 def run_spatiallm_pipeline(points: "np.ndarray", cfg: Any) -> Tuple[List[Any], List[Any]]:
@@ -565,15 +712,31 @@ def run_phone_first_pipeline(
 
     check_wall_agreement(payload.room_geometry["walls"], slm_walls or [])
 
+    # Plan 3b: propagate has_door / has_window from SLM walls onto the
+    # corresponding phone walls. SLM and phone wall lists rarely match
+    # 1:1 (SLM may emit 8 fragments where phone has 4 consolidated walls);
+    # match by nearest-segment-midpoint within 0.6m.
+    phone_walls_with_openings = _attach_openings_from_slm_walls(
+        payload.room_geometry["walls"], slm_walls or [],
+    )
+
     manhattan_yaw = float(payload.room_geometry.get("manhattan_yaw", 0.0))
     room_info = room_envelope_from_walls(
-        payload.room_geometry["walls"],
+        phone_walls_with_openings,
         payload.room_geometry["floor_height"],
         payload.room_geometry["ceiling_height"],
         positions=positions,
         manhattan_yaw=manhattan_yaw,
     )
-    objects = map_spatiallm_objects_to_room_objects(slm_objects or [])
+
+    # Plan 3b consensus pipeline: take the SLM-mapped objects and the
+    # phone's deduped 3D YOLO objects, run them through the four polish
+    # functions, and emit final RoomObjects with meaningful confidence.
+    objects = _build_final_objects(
+        slm_objects or [],
+        payload.yolo_objects,
+        phone_walls_with_openings,
+    )
 
     result = RoomPayload(room=room_info, objects=objects).to_dict()
     elapsed = time.time() - t0

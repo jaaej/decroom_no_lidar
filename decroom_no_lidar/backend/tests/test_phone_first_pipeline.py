@@ -304,3 +304,149 @@ def test_fixture_yolo_objects_parses_cleanly():
     payload = parse_payload(room_geom, ply, manifest, [], log, raw)
     assert len(payload.yolo_objects) == 3
     assert {o["category"] for o in payload.yolo_objects} == {"bed", "chair", "potted plant"}
+
+
+# ── Plan 3b Task 15: consensus pipeline wiring ───────────────────────────────
+
+def test_run_pipeline_applies_consensus_and_wall_snapping(monkeypatch):
+    """End-to-end: stub SpatialLM to return a bed 0.5m off the z=0 wall,
+    send a YOLO bed at the same position, and assert the final RoomPayload
+    bed is wall-snapped (z=0) and confidence > 0.5."""
+    import numpy as np
+    from pipeline import phone_first_pipeline as mod
+
+    def fake_run(points, cfg):
+        walls = [{
+            "id": "wall_0",
+            "start": [0.0, 0.0],
+            "end": [5.0, 0.0],
+            "has_door": False,
+            "has_window": False,
+        }]
+        objects = [{
+            "type": "bed",
+            "position": {"x": 2.0, "y": 0.0, "z": 0.5},
+            "rotation_y": 0.0,
+            "metadata": {"width": 1.6, "length": 2.0, "height": 0.6},
+            "confidence": 0.5,
+            "id": "slm0",
+        }]
+        return walls, objects
+    monkeypatch.setattr(mod, "run_spatiallm_pipeline", fake_run)
+    monkeypatch.setattr(mod, "load_ply_points",
+                         lambda b: (np.zeros((1, 3), dtype=np.float32),
+                                    np.zeros((1, 3), dtype=np.uint8)))
+
+    payload = mod.PhoneFirstPayload(
+        room_geometry={
+            "walls": [{"start": {"x": 0.0, "z": 0.0},
+                        "end": {"x": 5.0, "z": 0.0}}],
+            "floor_height": 0.0,
+            "ceiling_height": 2.5,
+            "manhattan_yaw": 0.0,
+            "coordinate_system": EXPECTED_COORDINATE_SYSTEM,
+        },
+        point_cloud_ply=b"ply\n",
+        keyframes_manifest={"frames": []},
+        keyframe_jpegs=[],
+        scan_log={},
+        yolo_objects=[{
+            "category": "bed",
+            "position": [2.0, 0.0, 0.5],
+            "peak_confidence": 0.85,
+            "view_count": 4,
+            "best_frame_index": 2,
+        }],
+    )
+
+    result = mod.run_phone_first_pipeline(payload, cfg=None)
+    beds = [o for o in result["objects"] if o["type"] == "bed"]
+    assert len(beds) == 1
+    bed = beds[0]
+    # Wall-snapped onto z=0.
+    assert abs(bed["position"]["z"]) < 1e-4, f"bed z={bed['position']['z']}"
+    # Consensus + YOLO multi-view + plausible size → confidence well above 0.5.
+    assert bed["confidence"] > 0.7, f"bed conf={bed['confidence']}"
+
+
+def test_run_pipeline_propagates_has_door_from_slm_to_phone_walls(monkeypatch):
+    """SLM emits a wall with has_door=True. The phone wall closest to that
+    SLM wall's midpoint should end up with has_door=True in the final
+    RoomPayload."""
+    import numpy as np
+    from pipeline import phone_first_pipeline as mod
+
+    def fake_run(points, cfg):
+        # SLM returns a wall with a door; same span as phone wall.
+        walls = [{
+            "id": "wall_0",
+            "start": [0.0, 0.0],
+            "end": [5.0, 0.0],
+            "has_door": True,
+            "has_window": False,
+        }]
+        return walls, []
+    monkeypatch.setattr(mod, "run_spatiallm_pipeline", fake_run)
+    monkeypatch.setattr(mod, "load_ply_points",
+                         lambda b: (np.zeros((1, 3), dtype=np.float32),
+                                    np.zeros((1, 3), dtype=np.uint8)))
+
+    payload = mod.PhoneFirstPayload(
+        room_geometry={
+            "walls": [{"start": {"x": 0.0, "z": 0.0},
+                        "end": {"x": 5.0, "z": 0.0}}],
+            "floor_height": 0.0,
+            "ceiling_height": 2.5,
+            "manhattan_yaw": 0.0,
+            "coordinate_system": EXPECTED_COORDINATE_SYSTEM,
+        },
+        point_cloud_ply=b"ply\n",
+        keyframes_manifest={"frames": []},
+        keyframe_jpegs=[],
+        scan_log={},
+        yolo_objects=[],
+    )
+
+    result = mod.run_phone_first_pipeline(payload, cfg=None)
+    walls = result["room"]["walls"]
+    assert any(w.get("has_door") for w in walls), \
+        f"no phone wall got has_door from SLM: {walls}"
+
+
+def test_run_pipeline_keeps_yolo_only_object_when_slm_missed_it(monkeypatch):
+    """SLM sees nothing; YOLO sees a bed. Final payload should still
+    contain a bed (lifted from YOLO with default dims, agreement=0.5)."""
+    import numpy as np
+    from pipeline import phone_first_pipeline as mod
+
+    monkeypatch.setattr(mod, "run_spatiallm_pipeline",
+                         lambda points, cfg: ([], []))
+    monkeypatch.setattr(mod, "load_ply_points",
+                         lambda b: (np.zeros((1, 3), dtype=np.float32),
+                                    np.zeros((1, 3), dtype=np.uint8)))
+
+    payload = mod.PhoneFirstPayload(
+        room_geometry={
+            "walls": [{"start": {"x": 0.0, "z": 0.0},
+                        "end": {"x": 5.0, "z": 0.0}}],
+            "floor_height": 0.0,
+            "ceiling_height": 2.5,
+            "manhattan_yaw": 0.0,
+            "coordinate_system": EXPECTED_COORDINATE_SYSTEM,
+        },
+        point_cloud_ply=b"ply\n",
+        keyframes_manifest={"frames": []},
+        keyframe_jpegs=[],
+        scan_log={},
+        yolo_objects=[{
+            "category": "bed",
+            "position": [2.0, 0.0, 1.5],
+            "peak_confidence": 0.85,
+            "view_count": 5,
+            "best_frame_index": 3,
+        }],
+    )
+
+    result = mod.run_phone_first_pipeline(payload, cfg=None)
+    beds = [o for o in result["objects"] if o["type"] == "bed"]
+    assert len(beds) == 1, "YOLO-only bed should survive into RoomPayload"
