@@ -37,17 +37,53 @@ POSITION_MATCH_DISTANCE_SMALL = 0.4
 _LARGE_CATEGORIES = {"bed", "couch", "sofa", "dining_table", "dresser",
                       "wardrobe", "bookshelf"}
 
-# YOLO categories accepted into consensus. COCO-80 has 80 classes
-# including person/car/banana etc. that produce noise in a room scan.
-# Whitelist matches what Decroom can render (Kenney USDZ models + a few
-# extras we can synthesize defaults for).
-INDOOR_CATEGORIES_WHITELIST = {
-    "bed", "couch", "sofa", "chair", "dining_table", "dining table",
-    "desk", "dresser", "wardrobe", "bookshelf", "nightstand",
-    "stool", "coffee_table", "side_table",
-    "tv", "laptop", "monitor", "lamp",
-    "potted plant", "potted_plant",
+# Map (input category) -> (kenney asset name without extension). Only
+# categories that resolve to an actually-bundled USDZ make it through
+# this map. Categories outside the keys get filtered out — including
+# 'laptop' (no asset) and 'tv' falls back to the closest substitute,
+# 'monitor'.
+#
+# 13 bundled Kenney models (per ls of decroom_no_lidar/*.usdz):
+#   bed, bookshelf, chair, desk, dresser, lamp_desk, lamp_floor,
+#   monitor, nightstand, plant, rug, sofa, table.
+CATEGORY_TO_ASSET: Dict[str, str] = {
+    # COCO-80 names + Decroom internal names mapped to Kenney files.
+    "bed":              "bed",
+    "couch":            "sofa",
+    "sofa":             "sofa",
+    "chair":            "chair",
+    "stool":            "chair",
+    "dining_table":     "table",
+    "dining table":     "table",
+    "coffee_table":     "table",
+    "side_table":       "table",
+    "desk":             "desk",
+    "dresser":          "dresser",
+    "wardrobe":         "dresser",
+    "bookshelf":        "bookshelf",
+    "nightstand":       "nightstand",
+    # Electronics — use the monitor model as a substitute for tv/monitor.
+    # Laptops are NOT mapped (no good asset; drop from rendering).
+    "tv":               "monitor",
+    "monitor":          "monitor",
+    # Decor
+    "lamp":             "lamp_floor",
+    "lamp_floor":       "lamp_floor",
+    "lamp_desk":        "lamp_desk",
+    "potted plant":     "plant",
+    "potted_plant":     "plant",
+    "plant":            "plant",
+    "rug":              "rug",
 }
+
+# Categories accepted into consensus = anything we have an asset for.
+INDOOR_CATEGORIES_WHITELIST = set(CATEGORY_TO_ASSET.keys())
+
+
+def asset_id_for(category: str) -> str:
+    """Map a category name to the bundled Kenney asset id used by iOS."""
+    base = CATEGORY_TO_ASSET.get(category)
+    return f"kenney_{base}" if base else f"kenney_{category}"
 
 
 def _match_distance(category: str) -> float:

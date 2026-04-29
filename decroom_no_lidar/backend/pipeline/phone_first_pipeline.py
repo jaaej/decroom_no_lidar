@@ -579,6 +579,7 @@ def _build_final_objects(
     compute_confidence on the SLM objects + phone YOLO objects, return
     the final RoomObject list."""
     from .consensus import (
+        asset_id_for,
         compute_confidence,
         collapse_duplicates,
         consensus_merge,
@@ -638,7 +639,7 @@ def _build_final_objects(
         final.append(RoomObject(
             id=m["id"],
             type=m["type"],
-            asset_id=f"kenney_{m['type']}",
+            asset_id=asset_id_for(m["type"]),
             position=ObjectPosition(
                 x=m["position"]["x"],
                 y=m["position"]["y"],

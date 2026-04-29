@@ -202,3 +202,47 @@ def test_consensus_keeps_yolo_inside_margin_of_walls():
     yolo = [_make_yolo("bed", 2, 0, -0.1)]
     merged, _ = consensus_merge(yolo, [], walls=walls)
     assert len(merged) == 1
+
+
+# ── Asset-id mapping ─────────────────────────────────────────────────────────
+
+def test_asset_id_maps_tv_to_kenney_monitor():
+    from pipeline.consensus import asset_id_for
+    # Closest bundled substitute: there's no kenney_tv.usdz.
+    assert asset_id_for("tv") == "kenney_monitor"
+
+
+def test_asset_id_maps_couch_to_kenney_sofa():
+    from pipeline.consensus import asset_id_for
+    assert asset_id_for("couch") == "kenney_sofa"
+
+
+def test_asset_id_for_all_whitelist_categories_resolves_to_bundled_kenney():
+    from pipeline.consensus import (
+        INDOOR_CATEGORIES_WHITELIST, asset_id_for, CATEGORY_TO_ASSET,
+    )
+    bundled = {
+        "bed", "bookshelf", "chair", "desk", "dresser",
+        "lamp_desk", "lamp_floor", "monitor", "nightstand",
+        "plant", "rug", "sofa", "table",
+    }
+    for cat in INDOOR_CATEGORIES_WHITELIST:
+        asset = asset_id_for(cat)
+        # Strip 'kenney_' prefix.
+        name = asset.removeprefix("kenney_")
+        assert name in bundled, \
+            f"category {cat!r} -> {asset} but {name}.usdz isn't bundled"
+
+
+def test_consensus_drops_laptop_no_asset_for_it():
+    from pipeline.consensus import consensus_merge
+    walls = [
+        {"start": {"x": 0, "z": 0}, "end": {"x": 5, "z": 0}},
+        {"start": {"x": 0, "z": 5}, "end": {"x": 5, "z": 5}},
+        {"start": {"x": 0, "z": 0}, "end": {"x": 0, "z": 5}},
+        {"start": {"x": 5, "z": 0}, "end": {"x": 5, "z": 5}},
+    ]
+    yolo = [_make_yolo("laptop", 2, 0, 2)]
+    merged, _ = consensus_merge(yolo, [], walls=walls)
+    # laptop has no Kenney asset; whitelist excludes it.
+    assert merged == []
