@@ -45,8 +45,10 @@ pip install --quiet fastapi uvicorn python-multipart requests
 pip install --quiet wheel setuptools --upgrade
 
 # 5. spconv + torch-scatter
-echo ">>> Installing spconv..."
-pip install --quiet spconv-cu120 || echo "WARNING: spconv install failed"
+# IMPORTANT: spconv must match the CUDA version of torch (12.4). spconv-cu120
+# imports cleanly but its sparse-conv kernels SIGFPE on cu124 PyTorch.
+echo ">>> Installing spconv (cu124 — must match torch's CUDA version)..."
+pip install --quiet spconv-cu124 || echo "WARNING: spconv-cu124 install failed"
 echo ">>> Installing torch-scatter..."
 pip install --quiet torch-scatter -f https://data.pyg.org/whl/torch-2.4.1+cu124.html \
     || echo "WARNING: torch-scatter install failed"
@@ -75,7 +77,7 @@ pip install --quiet --upgrade pip
 echo ">>> Downloading model weights to $HF (this may take a few minutes)..."
 python3 -c "from huggingface_hub import snapshot_download; snapshot_download('manycore-research/SpatialLM1.1-Qwen-0.5B'); print('Model cached.')"
 
-# 9. Copy server.py into place
+# 9. Copy server.py + code_template.txt into place
 echo ">>> Setting up server..."
 if [ -f /workspace/server.py ]; then
     cp /workspace/server.py "$SERVER_DIR/server.py"
@@ -88,6 +90,15 @@ else
     echo "             <repo>/decroom_no_lidar/backend/spatiallm_server/server.py \\"
     echo "             root@<IP>:$SERVER_DIR/server.py"
 fi
+
+# code_template.txt is REQUIRED — server.py refuses to start without it.
+# It lives next to server.py so the model gets the output schema in its prompt.
+# Without it the model degenerates to single-token loops (Wall(11,11,11,...)).
+echo ">>> Downloading SpatialLM code template..."
+curl -fsSL -o "$SERVER_DIR/code_template.txt" \
+    https://raw.githubusercontent.com/manycore-research/SpatialLM/main/code_template.txt \
+    && echo "    code_template.txt downloaded ($(wc -c < "$SERVER_DIR/code_template.txt") bytes)" \
+    || echo "WARNING: code_template.txt download failed — server will refuse to start"
 
 # 10. Persistent launcher script
 echo ">>> Writing /workspace/start-spatiallm.sh..."
