@@ -532,10 +532,17 @@ def run_spatiallm_pipeline(points: "np.ndarray", cfg: Any) -> Tuple[List[Any], L
     Returns (walls_list, objects_list). Walls come from parse_spatiallm_output's
     layout dict's "walls" field.
     """
-    # Colors are not essential for SpatialLM inference, but write_colored_ply
-    # expects them. Use a neutral grey if not provided.
+    # Colors are not essential for SpatialLM inference, but its NormalizeColor
+    # transform z-scores per-batch — a uniform grey input has zero std and
+    # the divide produces a CUDA SIGFPE / "Floating point exception". Use
+    # a small Gaussian noise around 128 so std > 0 without changing what
+    # the model "sees".
     n = points.shape[0]
-    colors = np.full((n, 3), 128, dtype=np.uint8)
+    rng = np.random.default_rng(seed=0)
+    colors = np.clip(
+        128 + rng.normal(0, 4, size=(n, 3)),
+        0, 255,
+    ).astype(np.uint8)
     layout, objects = _run_spatiallm_on_phone_ply(points, colors, cfg)
     walls = layout.get("walls", []) if isinstance(layout, dict) else []
     return walls, objects
