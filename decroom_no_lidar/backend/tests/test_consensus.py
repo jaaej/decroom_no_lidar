@@ -160,3 +160,45 @@ def test_collapse_duplicates_single_input_unchanged():
     o = [{"id": "x", "type": "bed", "position": {"x": 0, "y": 0, "z": 0},
            "metadata": {}, "_confidence": 0.5}]
     assert collapse_duplicates(o) == o
+
+
+# ── YOLO input filter (Plan 3b post-QA hardening) ────────────────────────────
+
+def _wall(x0, z0, x1, z1):
+    return {"start": {"x": x0, "z": z0}, "end": {"x": x1, "z": z1}}
+
+
+def test_consensus_drops_yolo_non_indoor_categories():
+    walls = [_wall(0, 0, 5, 0), _wall(0, 0, 0, 5),
+             _wall(5, 0, 5, 5), _wall(0, 5, 5, 5)]
+    yolo = [
+        _make_yolo("person", 2, 0, 2),
+        _make_yolo("car", 3, 0, 3),
+        _make_yolo("bed", 2, 0, 2),
+    ]
+    merged, _ = consensus_merge(yolo, [], walls=walls)
+    cats = {o["type"] for o in merged}
+    assert "person" not in cats
+    assert "car" not in cats
+    assert "bed" in cats
+
+
+def test_consensus_drops_yolo_outside_room_bounds():
+    walls = [_wall(0, 0, 5, 0), _wall(0, 0, 0, 5),
+             _wall(5, 0, 5, 5), _wall(0, 5, 5, 5)]
+    yolo = [
+        _make_yolo("bed", 2, 0, 2),
+        _make_yolo("bed", 10, 0, 10),
+    ]
+    merged, _ = consensus_merge(yolo, [], walls=walls)
+    assert len(merged) == 1
+    assert merged[0]["position"]["x"] == 2
+
+
+def test_consensus_keeps_yolo_inside_margin_of_walls():
+    walls = [_wall(0, 0, 5, 0), _wall(0, 0, 0, 5),
+             _wall(5, 0, 5, 5), _wall(0, 5, 5, 5)]
+    # 0.1m past z=0 wall — within the 0.3m margin -> keep.
+    yolo = [_make_yolo("bed", 2, 0, -0.1)]
+    merged, _ = consensus_merge(yolo, [], walls=walls)
+    assert len(merged) == 1

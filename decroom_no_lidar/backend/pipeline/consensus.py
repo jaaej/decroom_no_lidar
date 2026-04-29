@@ -37,6 +37,18 @@ POSITION_MATCH_DISTANCE_SMALL = 0.4
 _LARGE_CATEGORIES = {"bed", "couch", "sofa", "dining_table", "dresser",
                       "wardrobe", "bookshelf"}
 
+# YOLO categories accepted into consensus. COCO-80 has 80 classes
+# including person/car/banana etc. that produce noise in a room scan.
+# Whitelist matches what Decroom can render (Kenney USDZ models + a few
+# extras we can synthesize defaults for).
+INDOOR_CATEGORIES_WHITELIST = {
+    "bed", "couch", "sofa", "chair", "dining_table", "dining table",
+    "desk", "dresser", "wardrobe", "bookshelf", "nightstand",
+    "stool", "coffee_table", "side_table",
+    "tv", "laptop", "monitor", "lamp",
+    "potted plant", "potted_plant",
+}
+
 
 def _match_distance(category: str) -> float:
     return POSITION_MATCH_DISTANCE_LARGE if category in _LARGE_CATEGORIES \
@@ -103,6 +115,63 @@ def _yolo_to_merged(yolo: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _room_xz_bounds(walls: List[Dict[str, Any]],
+                       margin: float = 0.3) -> Tuple[float, float, float, float] | None:
+    """Return (min_x, max_x, min_z, max_z) of the wall polygon plus a
+    small margin (so objects right against a wall aren't filtered out).
+    Returns None if walls are empty."""
+    if not walls:
+        return None
+    xs: List[float] = []
+    zs: List[float] = []
+    for w in walls:
+        for endpoint_key in ("start", "end"):
+            ep = w.get(endpoint_key)
+            if isinstance(ep, dict):
+                xs.append(float(ep.get("x", 0)))
+                zs.append(float(ep.get("z", 0)))
+            elif isinstance(ep, (list, tuple)) and len(ep) >= 2:
+                xs.append(float(ep[0]))
+                zs.append(float(ep[1]))
+    if not xs:
+        return None
+    return (min(xs) - margin, max(xs) + margin,
+            min(zs) - margin, max(zs) + margin)
+
+
+def _yolo_inside_room(yolo: Dict[str, Any],
+                        bounds: Tuple[float, float, float, float] | None) -> bool:
+    if bounds is None:
+        return True
+    x_min, x_max, z_min, z_max = bounds
+    px, _, pz = yolo["position"]
+    return x_min <= px <= x_max and z_min <= pz <= z_max
+
+
+def _filter_yolo_input(
+    yolo_objects_3d: List[Dict[str, Any]],
+    walls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Drop YOLO objects with non-indoor categories or positions outside
+    the room footprint. These produce noise in the consensus output."""
+    bounds = _room_xz_bounds(walls)
+    out: List[Dict[str, Any]] = []
+    for y in yolo_objects_3d:
+        cat = y.get("category", "")
+        if cat not in INDOOR_CATEGORIES_WHITELIST:
+            logger.info("YOLO filter: dropping non-indoor category %r", cat)
+            continue
+        if not _yolo_inside_room(y, bounds):
+            px, _, pz = y["position"]
+            logger.info(
+                "YOLO filter: dropping %r at (%.2f, %.2f) outside room bounds %s",
+                cat, px, pz, bounds,
+            )
+            continue
+        out.append(y)
+    return out
+
+
 def consensus_merge(
     yolo_objects_3d: List[Dict[str, Any]],
     slm_objects: List[Dict[str, Any]],
@@ -112,8 +181,9 @@ def consensus_merge(
     Match YOLO's deduped 3D-tracked objects against SpatialLM output.
 
     Returns (merged_objects, agreement_scores_by_id).
-    The `walls` argument is accepted for future use; consensus_merge
-    itself doesn't snap to walls (that's snap_to_walls).
+    The `walls` argument scopes the YOLO input filter (drops objects
+    whose 3D position is outside the room polygon). Wall-snapping
+    happens later in snap_to_walls.
 
     Outcomes (one row per scenario from the design spec):
       - YOLO + SLM same category, within match distance →
@@ -129,6 +199,9 @@ def consensus_merge(
       - YOLO + SLM disagree on category at the same position →
         keep SLM (oriented bbox), agreement = 0.3, log diagnostic
     """
+    # Pre-filter YOLO: drop non-indoor categories and out-of-room positions.
+    yolo_objects_3d = _filter_yolo_input(yolo_objects_3d, walls)
+
     merged: List[Dict[str, Any]] = []
     agreement: Dict[str, float] = {}
     slm_used = [False] * len(slm_objects)

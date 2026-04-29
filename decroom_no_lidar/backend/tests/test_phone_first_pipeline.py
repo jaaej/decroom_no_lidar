@@ -425,10 +425,16 @@ def test_run_pipeline_keeps_yolo_only_object_when_slm_missed_it(monkeypatch):
                          lambda b: (np.zeros((1, 3), dtype=np.float32),
                                     np.zeros((1, 3), dtype=np.uint8)))
 
+    # Realistic 4-wall rectangle so the YOLO room-bounds filter sees
+    # a real room polygon — bed at (2, 0, 1.5) falls inside it.
     payload = mod.PhoneFirstPayload(
         room_geometry={
-            "walls": [{"start": {"x": 0.0, "z": 0.0},
-                        "end": {"x": 5.0, "z": 0.0}}],
+            "walls": [
+                {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 5.0, "z": 0.0}},
+                {"start": {"x": 0.0, "z": 3.0}, "end": {"x": 5.0, "z": 3.0}},
+                {"start": {"x": 0.0, "z": 0.0}, "end": {"x": 0.0, "z": 3.0}},
+                {"start": {"x": 5.0, "z": 0.0}, "end": {"x": 5.0, "z": 3.0}},
+            ],
             "floor_height": 0.0,
             "ceiling_height": 2.5,
             "manhattan_yaw": 0.0,
