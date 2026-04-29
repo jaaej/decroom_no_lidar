@@ -54,7 +54,9 @@
       "Bash(rm -rf /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar/.git)",
       "Bash(mkdir /tmp/decroom_backup)",
       "Bash(cp -a /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar/. /tmp/decroom_backup/)",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "Bash(xcrun simctl *)",
+      "Bash(open -a Simulator)"
     ]
   }
 }
