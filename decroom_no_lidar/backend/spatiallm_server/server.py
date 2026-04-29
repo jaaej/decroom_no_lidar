@@ -67,9 +67,7 @@ def load_model():
 def preprocess_point_cloud(ply_path: str) -> torch.Tensor:
     """Load PLY, clean up, and convert to model input tensor."""
     from spatiallm.pcd.pcd_loader import cleanup_pcd, get_points_and_colors, load_o3d_pcd
-    from spatiallm.pcd.transform import (
-        Compose, GridSample, NormalizeColor, PositiveShift,
-    )
+    from spatiallm.pcd.transform import Compose
 
     grid_size = 32.0 / 1280  # SpatialLM 1.1 uses 1280 bins
 
@@ -81,22 +79,25 @@ def preprocess_point_cloud(ply_path: str) -> torch.Tensor:
     points, colors = get_points_and_colors(pcd)
     logger.info("After cleanup: %d points", len(points))
 
-    # Apply transforms: normalize colors, shift to positive coords, grid sample
+    # Apply transforms: normalize colors, shift to positive coords, grid sample.
+    # The current spatiallm Compose registry expects mmcv-style cfg dicts
+    # ({"type": "...", ...}) — not pre-instantiated classes.
     data = {
         "coord": points.astype(np.float32),
         "color": colors.astype(np.float32),
     }
 
     transform = Compose([
-        NormalizeColor(),
-        PositiveShift(),
-        GridSample(
-            grid_size=grid_size,
-            hash_type="fnv",
-            mode="train",
-            keys=("coord", "color"),
-            return_grid_coord=True,
-        ),
+        {"type": "NormalizeColor"},
+        {"type": "PositiveShift"},
+        {
+            "type": "GridSample",
+            "grid_size": grid_size,
+            "hash_type": "fnv",
+            "mode": "train",
+            "keys": ("coord", "color"),
+            "return_grid_coord": True,
+        },
     ])
 
     data = transform(data)
