@@ -525,6 +525,55 @@ def _run_spatiallm_on_phone_ply(
     return layout, objects
 
 
+# ── Point cloud crop to room footprint ──────────────────────────────────────
+
+def _crop_to_room_bbox(
+    positions: "np.ndarray",
+    walls: List[Dict[str, Any]],
+    floor_height: float,
+    ceiling_height: float,
+    margin: float = 0.5,
+) -> "np.ndarray":
+    """Drop points outside the wall-polygon bbox + a margin in XZ, plus a
+    height range from floor-margin to ceiling+margin in Y.
+
+    Phone depth often produces outliers way outside the real room (seeing
+    through windows / doorways / specular reflections). SpatialLM degrades
+    badly on the resulting low-density cloud. Cropping concentrates the
+    cloud back onto the room itself.
+    """
+    if positions is None or len(positions) == 0 or not walls:
+        return positions
+
+    xs: List[float] = []
+    zs: List[float] = []
+    for w in walls:
+        for k in ("start", "end"):
+            ep = w.get(k)
+            if isinstance(ep, dict):
+                xs.append(float(ep.get("x", 0)))
+                zs.append(float(ep.get("z", 0)))
+            elif isinstance(ep, (list, tuple)) and len(ep) >= 2:
+                xs.append(float(ep[0]))
+                zs.append(float(ep[1]))
+    if not xs:
+        return positions
+
+    x_min = min(xs) - margin
+    x_max = max(xs) + margin
+    z_min = min(zs) - margin
+    z_max = max(zs) + margin
+    y_min = min(floor_height, ceiling_height) - margin
+    y_max = max(floor_height, ceiling_height) + margin
+
+    mask = (
+        (positions[:, 0] >= x_min) & (positions[:, 0] <= x_max) &
+        (positions[:, 1] >= y_min) & (positions[:, 1] <= y_max) &
+        (positions[:, 2] >= z_min) & (positions[:, 2] <= z_max)
+    )
+    return positions[mask]
+
+
 # ── Plan 3b: door/window propagation + consensus pipeline ───────────────────
 
 def _segment_midpoint(start: Any, end: Any) -> Tuple[float, float]:
@@ -714,10 +763,32 @@ def run_phone_first_pipeline(
     # the ".noFurnitureDetected" info toast in that case, and the scan
     # saves with walls-only. When SpatialLM is reachable again on a later
     # scan, furniture detection resumes automatically.
+    # Crop the point cloud to the room's actual extent before sending to
+    # SpatialLM. The phone's depth model often "sees" through windows /
+    # doorways and produces noisy points 5+ m outside the real room — for
+    # a typical scan we observed 200K points spread over 454 m³, which
+    # gives only ~440 pts/m³ at SLM input (100× too sparse — the model
+    # needs ~50K pts/m³ to recognize furniture). Cropping to the room
+    # bbox (with a 0.5 m margin to keep wall surfaces) raises density
+    # by 30-100×.
+    positions_for_slm = _crop_to_room_bbox(
+        positions,
+        payload.room_geometry["walls"],
+        floor_height=float(payload.room_geometry["floor_height"]),
+        ceiling_height=float(payload.room_geometry["ceiling_height"]),
+        margin=0.5,
+    )
+    logger.info(
+        "Cropped point cloud %d -> %d for SpatialLM (%.1f%% kept)",
+        len(positions),
+        len(positions_for_slm),
+        100.0 * len(positions_for_slm) / max(1, len(positions)),
+    )
+
     slm_walls: List[Any] = []
     slm_objects: List[Any] = []
     try:
-        slm_walls, slm_objects = run_spatiallm_pipeline(points=positions, cfg=cfg)
+        slm_walls, slm_objects = run_spatiallm_pipeline(points=positions_for_slm, cfg=cfg)
     except Exception as e:
         logger.warning(
             "SpatialLM inference unavailable — returning walls-only: %s", e
