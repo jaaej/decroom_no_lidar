@@ -484,10 +484,12 @@ def _run_spatiallm_on_phone_ply(
     slm_points, coord_offset = arkit_to_spatiallm_coords(positions)
 
     # Subsample if the phone sent too many points. SpatialLM's voxel encoder
-    # crashes (Floating point exception / CUDA kernel failure) on inputs
-    # > ~250K. Phone caps at 500K, which is too much; random-subsample to
-    # 200K here so the pipeline survives. Override via env if needed.
-    max_points = int(os.getenv("DECROOM_SPATIALLM_MAX_POINTS", "200000"))
+    # used to crash (SIGFPE) on >250K inputs but that was the spconv-cu120
+    # vs cu124 mismatch — fixed since. After the room-bbox crop, density
+    # matters more than total count, so we raise the default cap to 500K
+    # (effectively no subsample for typical scans) and let the model's
+    # own cleanup_pcd voxel-downsample to its 2.5cm grid.
+    max_points = int(os.getenv("DECROOM_SPATIALLM_MAX_POINTS", "500000"))
     if len(slm_points) > max_points:
         rng = np.random.default_rng(seed=0)
         idx = rng.choice(len(slm_points), max_points, replace=False)
