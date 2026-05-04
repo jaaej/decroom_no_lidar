@@ -236,9 +236,10 @@ Same `RoomObject` schema as today. Just more entries because RGB found things YO
 
 ### Phase A — backend RGB detector standalone
 
-1. Add Grounding DINO load to `server.py`. New `/detect_furniture` endpoint. Verify on a sample image (e.g., a photo of a bedroom from /tmp).
-2. Add `backend/pipeline/rgb_detection.py` that calls the new endpoint over the SSH tunnel.
-3. Unit tests with mocked HTTP response.
+1. **Model-quality gate (blocking)**. Before any backend plumbing, take 3–5 photos of the actual QA bedroom (the same room that produced the 0-furniture Plan 3b QA scan). Run Grounding DINO with the proposed prompt list against those photos in a standalone notebook or script — no `server.py`, no pipeline integration yet. Document per-category hit/miss in `docs/superpowers/qa/YYYY-MM-DD-plan3c-detector-gate.md`. **Go criterion**: target categories (wardrobe, bookshelf, desk, dresser, nightstand, bed) achieve ≥70% recall at confidence ≥0.4 across the test photos. If the gate fails, stop and revise the spec — either swap to OWL-ViT (test the same way), or accept that some categories are user-placement-only in Plan 4b. Do NOT proceed to step 2 until the gate passes.
+2. Add Grounding DINO load to `server.py`. New `/detect_furniture` endpoint.
+3. Add `backend/pipeline/rgb_detection.py` that calls the new endpoint over the SSH tunnel.
+4. Unit tests with mocked HTTP response.
 
 ### Phase B — raycast lifting
 
