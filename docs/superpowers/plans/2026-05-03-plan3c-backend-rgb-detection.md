@@ -67,11 +67,30 @@ Tasks run in order. Phase A0 (Task 1) is a manual blocking gate — no plumbing 
 - Create: `docs/superpowers/qa/<today>-plan3c-detector-gate.md`
 - Create (throwaway): `/tmp/plan3c_gate.py` (standalone notebook-style script — not committed to repo)
 
-**Goal:** Verify Grounding DINO can recall the target indoor-furniture categories on photos of the actual QA bedroom *before* writing any backend plumbing. If it can't, revise the spec.
+**Goal:** Verify Grounding DINO can recall the target indoor-furniture categories on the **actual keyframe JPEGs** the phone uploaded during a Plan 3b QA scan, *before* writing any backend plumbing. Using real keyframes (not staged photos taken with a separate camera) tests the model on the exact image quality, framing, and ARKit `capturedImage` orientation it'll see in production. If recall is insufficient on these images, revise the spec.
 
-- [ ] **Step 1: Take 3–5 photos of the QA bedroom.**
+- [ ] **Step 1: Source the keyframe JPEGs from a real Plan 3b QA scan.**
 
-The room must be the same one that produced the 0-furniture Plan 3b QA scan (the 3.04 × 3.25 m bedroom with bed, wardrobe, bookshelf, desk, 2 monitors, chair, door). Photograph from oblique angles like a phone scan would capture. Save as `/tmp/plan3c_gate/photo_01.jpg` … `photo_05.jpg`.
+Use whichever of these is available — in priority order:
+
+**Option A — backend upload archive (preferred).** If the local backend persists uploaded payloads (check `decroom_no_lidar/backend/` for any `uploads/` or `received_scans/` directory, or `/tmp/decroom_uploads/`), grab the 10 keyframes from the most recent QA scan:
+```bash
+ls -lt /tmp/decroom_uploads 2>/dev/null || \
+  find /Users/jaejeon/Desktop/Decroom/decroom_no_lidar -type d -name "uploads" -o -name "received_scans" 2>/dev/null
+# Identify the most-recent scan dir, then:
+mkdir -p /tmp/plan3c_gate
+cp <scan_dir>/keyframes/*.jpg /tmp/plan3c_gate/
+```
+
+**Option B — pull from the iOS device's `last_payload`.** ScanUploadPayload writes to `Documents/last_payload/keyframes/`. Pull via Xcode (Devices and Simulators → select device → Decroom container → Documents → last_payload → keyframes), or via Finder if iCloud sync is on. Drop into `/tmp/plan3c_gate/`.
+
+**Option C — re-run one fresh QA scan to regenerate.** Drive the iOS app through one full capture of the QA bedroom (no special handling needed; same flow that produced the original 0-furniture Plan 3b scan). The keyframes land on the device per Option B and the backend per Option A.
+
+Verify before continuing:
+```bash
+ls /tmp/plan3c_gate/*.jpg | wc -l   # expect ~10
+```
+If <5 files, source from a different option.
 
 - [ ] **Step 2: Write the standalone gate script.**
 
@@ -99,8 +118,8 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
 
-    photos = sorted(PHOTOS_DIR.glob("photo_*.jpg"))
-    print(f"Testing {len(photos)} photos with prompt: {PROMPT}")
+    photos = sorted(PHOTOS_DIR.glob("*.jpg"))
+    print(f"Testing {len(photos)} keyframes with prompt: {PROMPT}")
     per_photo_hits: dict[str, set[str]] = {}
     for photo_path in photos:
         image = Image.open(photo_path).convert("RGB")
@@ -163,7 +182,7 @@ Create `docs/superpowers/qa/<today>-plan3c-detector-gate.md`:
 **Model**: IDEA-Research/grounding-dino-tiny
 **Prompt**: "bed. wardrobe. bookshelf. desk. monitor. chair. nightstand. dresser. lamp. potted plant. sofa."
 **Confidence threshold**: 0.4
-**Photos**: 5 photos of QA bedroom (3.04 × 3.25 m, bed/wardrobe/bookshelf/desk/2 monitors/chair)
+**Source images**: N keyframe JPEGs from Plan 3b QA scan of bedroom (3.04 × 3.25 m, bed/wardrobe/bookshelf/desk/2 monitors/chair). Source: <Option A backend archive | Option B device last_payload | Option C fresh re-scan>
 
 ## Per-target recall
 
@@ -315,8 +334,8 @@ async def detect_furniture(
 
 ```bash
 # On the pod (after restarting server.py):
-curl -X POST -F "images=@/tmp/plan3c_gate/photo_01.jpg" \
-              -F "images=@/tmp/plan3c_gate/photo_02.jpg" \
+curl -X POST -F "images=@/tmp/plan3c_gate/$(ls /tmp/plan3c_gate | head -1)" \
+              -F "images=@/tmp/plan3c_gate/$(ls /tmp/plan3c_gate | sed -n 2p)" \
               -F "prompt=bed. wardrobe. desk." \
               http://localhost:8100/detect_furniture | python3 -m json.tool
 ```
@@ -383,8 +402,8 @@ git commit -m "build(server): pre-cache Grounding DINO weights in setup.sh"
 
 ```bash
 # On the local machine with the SSH tunnel open (port 8100):
-curl -s -X POST -F "images=@/tmp/plan3c_gate/photo_01.jpg" \
-                -F "images=@/tmp/plan3c_gate/photo_02.jpg" \
+curl -s -X POST -F "images=@/tmp/plan3c_gate/$(ls /tmp/plan3c_gate | head -1)" \
+                -F "images=@/tmp/plan3c_gate/$(ls /tmp/plan3c_gate | sed -n 2p)" \
                 http://localhost:8100/detect_furniture \
   > decroom_no_lidar/backend/tests/fixtures/grounding_dino_response.json
 ```
@@ -612,7 +631,7 @@ cd decroom_no_lidar/backend
 python3 -c "
 from pathlib import Path
 from pipeline.rgb_detection import detect_furniture_in_keyframes
-jpegs = [Path(p).read_bytes() for p in sorted(Path('/tmp/plan3c_gate').glob('photo_*.jpg'))]
+jpegs = [Path(p).read_bytes() for p in sorted(Path('/tmp/plan3c_gate').glob('*.jpg'))]
 out = detect_furniture_in_keyframes(jpegs)
 for d in out: print(d)
 print(f'TOTAL: {len(out)} detections')
