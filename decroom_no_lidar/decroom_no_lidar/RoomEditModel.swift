@@ -61,11 +61,28 @@ final class RoomEditModel: ObservableObject {
     }
 
     func move(_ id: String, to xz: SIMD2<Float>, gestureBegan: Bool) {
-        // Task 4
+        guard let idx = roomPayload.objects.firstIndex(where: { $0.id == id }) else { return }
+        if gestureBegan {
+            previousObjects = roomPayload.objects
+            canUndo = true
+        }
+        let old = roomPayload.objects[idx]
+        let newPos = ObjectPosition(x: Double(xz.x), y: old.position.y, z: Double(xz.y))
+        var newObjects = roomPayload.objects
+        newObjects[idx] = old.with(position: newPos)
+        roomPayload = roomPayload.with(objects: newObjects)
     }
 
     func rotate(_ id: String, toRadians y: Float, gestureBegan: Bool) {
-        // Task 4
+        guard let idx = roomPayload.objects.firstIndex(where: { $0.id == id }) else { return }
+        if gestureBegan {
+            previousObjects = roomPayload.objects
+            canUndo = true
+        }
+        let old = roomPayload.objects[idx]
+        var newObjects = roomPayload.objects
+        newObjects[idx] = old.with(rotationY: Double(y))
+        roomPayload = roomPayload.with(objects: newObjects)
     }
 
     func undo() {

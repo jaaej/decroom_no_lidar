@@ -103,4 +103,63 @@ final class RoomEditModelTests: XCTestCase {
         XCTAssertEqual(model.roomPayload.objects.count, 1)
         XCTAssertFalse(model.canUndo)
     }
+
+    // MARK: - move(_:to:gestureBegan:)
+
+    func test_move_began_snapshots() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a")]))
+        model.move("a", to: SIMD2<Float>(1, 1), gestureBegan: true)
+        XCTAssertTrue(model.canUndo)
+    }
+
+    func test_move_subsequentUpdates_dontReSnapshot() {
+        let original = [makeObject(id: "a", x: 0, z: 0)]
+        let model = RoomEditModel(initial: makePayload(original))
+        model.move("a", to: SIMD2<Float>(1, 1), gestureBegan: true)
+        model.move("a", to: SIMD2<Float>(2, 2), gestureBegan: false)
+        model.undo()
+        XCTAssertEqual(model.roomPayload.objects[0].position.x, 0)
+        XCTAssertEqual(model.roomPayload.objects[0].position.z, 0)
+    }
+
+    func test_move_appliesXZ_preservesY() {
+        let model = RoomEditModel(
+            initial: makePayload([makeObject(id: "a", x: 0, y: 0.5, z: 0)])
+        )
+        model.move("a", to: SIMD2<Float>(3, 4), gestureBegan: true)
+        let obj = model.roomPayload.objects[0]
+        XCTAssertEqual(obj.position.x, 3, accuracy: 1e-5)
+        XCTAssertEqual(obj.position.z, 4, accuracy: 1e-5)
+        XCTAssertEqual(obj.position.y, 0.5, accuracy: 1e-5)
+    }
+
+    func test_move_unknownID_noOp() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a")]))
+        model.move("nope", to: SIMD2<Float>(1, 1), gestureBegan: true)
+        XCTAssertFalse(model.canUndo)
+    }
+
+    // MARK: - rotate(_:toRadians:gestureBegan:)
+
+    func test_rotate_began_snapshots() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a")]))
+        model.rotate("a", toRadians: .pi / 2, gestureBegan: true)
+        XCTAssertTrue(model.canUndo)
+    }
+
+    func test_rotate_appliesRadians() {
+        let model = RoomEditModel(
+            initial: makePayload([makeObject(id: "a", rot: 0)])
+        )
+        model.rotate("a", toRadians: .pi, gestureBegan: true)
+        XCTAssertEqual(model.roomPayload.objects[0].rotation_y, Double.pi, accuracy: 1e-5)
+    }
+
+    func test_rotate_subsequentUpdates_dontReSnapshot() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a", rot: 0)]))
+        model.rotate("a", toRadians: .pi / 2, gestureBegan: true)
+        model.rotate("a", toRadians: .pi, gestureBegan: false)
+        model.undo()
+        XCTAssertEqual(model.roomPayload.objects[0].rotation_y, 0, accuracy: 1e-5)
+    }
 }
