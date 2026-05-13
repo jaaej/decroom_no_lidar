@@ -246,3 +246,19 @@ def test_consensus_drops_laptop_no_asset_for_it():
     merged, _ = consensus_merge(yolo, [], walls=walls)
     # laptop has no Kenney asset; whitelist excludes it.
     assert merged == []
+
+
+def test_every_rgb_prompt_category_resolves_to_asset():
+    """Plan 3c: every category in the default Grounding DINO prompt list
+    must have a CATEGORY_TO_ASSET mapping so consensus doesn't drop them."""
+    from pipeline.consensus import CATEGORY_TO_ASSET
+    from pipeline.rgb_detection import DEFAULT_PROMPT_CATEGORIES
+
+    missing = [c for c in DEFAULT_PROMPT_CATEGORIES
+               if c not in CATEGORY_TO_ASSET
+               and c.replace(" ", "_") not in CATEGORY_TO_ASSET]
+    assert missing == [], (
+        f"Plan 3c prompt categories without asset mapping: {missing}. "
+        f"Add to consensus.CATEGORY_TO_ASSET (substitute is fine — "
+        f"e.g. wardrobe -> dresser)."
+    )
