@@ -50,7 +50,14 @@ final class RoomEditModel: ObservableObject {
     // MARK: - Mutations (stubs — implemented in later tasks)
 
     func delete(_ id: String) {
-        // Task 3
+        guard roomPayload.objects.contains(where: { $0.id == id }) else { return }
+        previousObjects = roomPayload.objects
+        canUndo = true
+        let newObjects = roomPayload.objects.filter { $0.id != id }
+        roomPayload = roomPayload.with(objects: newObjects)
+        if selectedObjectID == id {
+            selectedObjectID = nil
+        }
     }
 
     func move(_ id: String, to xz: SIMD2<Float>, gestureBegan: Bool) {
