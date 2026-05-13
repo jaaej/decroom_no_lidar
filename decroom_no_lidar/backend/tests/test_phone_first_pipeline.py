@@ -456,3 +456,103 @@ def test_run_pipeline_keeps_yolo_only_object_when_slm_missed_it(monkeypatch):
     result = mod.run_phone_first_pipeline(payload, cfg=None)
     beds = [o for o in result["objects"] if o["type"] == "bed"]
     assert len(beds) == 1, "YOLO-only bed should survive into RoomPayload"
+
+
+def test_run_pipeline_merges_backend_rgb_into_combined_detections(monkeypatch):
+    """Plan 3c: when /detect_furniture returns clusters, they merge into
+    the same combined-detections list that consensus_merge sees, alongside
+    on-device YOLO objects. Final RoomPayload should contain a wardrobe
+    even though YOLO COCO-80 has no such category."""
+    import numpy as np
+    from pipeline import phone_first_pipeline as mod
+    from pipeline import keyframe_clustering as kc_mod
+    from pipeline import raycast_lift as lift_mod
+    from pipeline import rgb_detection as rgb_mod
+    from pipeline.raycast_lift import LiftedDetection
+    from pipeline.rgb_detection import KeyframeDetection
+
+    fake_2d = [
+        KeyframeDetection(frame_index=0, category="wardrobe",
+                          bbox_normalized=(0.4, 0.4, 0.2, 0.2),
+                          confidence=0.7),
+    ]
+    fake_lifted = [
+        LiftedDetection(frame_index=0, category="wardrobe",
+                        bbox_normalized=(0.4, 0.4, 0.2, 0.2),
+                        confidence=0.7,
+                        position_3d=(0.5, 0.0, 0.0)),
+    ]
+    monkeypatch.setattr(rgb_mod, "detect_furniture_in_keyframes",
+                         lambda *a, **k: fake_2d)
+    monkeypatch.setattr(lift_mod, "lift_detections_to_3d",
+                         lambda *a, **k: fake_lifted)
+    # SLM returns nothing — wardrobe must come from RGB path alone.
+    monkeypatch.setattr(mod, "run_spatiallm_pipeline",
+                         lambda points, cfg: ([], []))
+    monkeypatch.setattr(mod, "load_ply_points",
+                         lambda b: (np.zeros((1, 3), dtype=np.float32),
+                                    np.zeros((1, 3), dtype=np.uint8)))
+
+    payload = mod.PhoneFirstPayload(
+        room_geometry={
+            "walls": [{"start": {"x": 0.0, "z": 0.0},
+                        "end": {"x": 5.0, "z": 0.0}}],
+            "floor_height": 0.0,
+            "ceiling_height": 2.5,
+            "manhattan_yaw": 0.0,
+            "coordinate_system": EXPECTED_COORDINATE_SYSTEM,
+        },
+        point_cloud_ply=b"ply\n",
+        keyframes_manifest={"frames": []},
+        keyframe_jpegs=[b"fake_jpeg"],
+        scan_log={},
+        yolo_objects=[{
+            "category": "chair",
+            "position": [2.0, 0.0, 0.2],   # within the test room's z bounds
+            "peak_confidence": 0.9,
+            "view_count": 3,
+            "best_frame_index": 0,
+        }],
+    )
+
+    result = mod.run_phone_first_pipeline(payload, cfg=None)
+    types = sorted(o["type"] for o in result["objects"])
+    assert "wardrobe" in types, f"expected wardrobe in {types}"
+    assert "chair" in types, f"expected chair in {types}"
+
+
+def test_run_pipeline_continues_when_rgb_detection_fails(monkeypatch):
+    """Plan 3c: if /detect_furniture errors out (pod down, network), the
+    pipeline must still return a valid RoomPayload using YOLO + SLM only."""
+    import numpy as np
+    from pipeline import phone_first_pipeline as mod
+    from pipeline import rgb_detection as rgb_mod
+
+    def boom(*a, **k):
+        raise ConnectionError("pod is down")
+    monkeypatch.setattr(rgb_mod, "detect_furniture_in_keyframes", boom)
+    monkeypatch.setattr(mod, "run_spatiallm_pipeline",
+                         lambda points, cfg: ([], []))
+    monkeypatch.setattr(mod, "load_ply_points",
+                         lambda b: (np.zeros((1, 3), dtype=np.float32),
+                                    np.zeros((1, 3), dtype=np.uint8)))
+
+    payload = mod.PhoneFirstPayload(
+        room_geometry={
+            "walls": [{"start": {"x": 0.0, "z": 0.0},
+                        "end": {"x": 5.0, "z": 0.0}}],
+            "floor_height": 0.0, "ceiling_height": 2.5,
+            "manhattan_yaw": 0.0,
+            "coordinate_system": EXPECTED_COORDINATE_SYSTEM,
+        },
+        point_cloud_ply=b"ply\n",
+        keyframes_manifest={"frames": []},
+        keyframe_jpegs=[b"fake"],
+        scan_log={},
+        yolo_objects=[],
+    )
+
+    # Should not raise.
+    result = mod.run_phone_first_pipeline(payload, cfg=None)
+    assert isinstance(result, dict)
+    assert "objects" in result

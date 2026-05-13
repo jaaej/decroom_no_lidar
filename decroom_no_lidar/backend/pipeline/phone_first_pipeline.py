@@ -633,6 +633,24 @@ def _attach_openings_from_slm_walls(
     return out
 
 
+def _merge_phone_and_backend_detections(
+    phone_yolo: List[Dict[str, Any]],
+    backend_rgb: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Plan 3c: combine on-device YOLO tracks with backend RGB clusters
+    into a single 'phone+backend detection' list.
+
+    Both inputs share the yolo_objects.json shape:
+      {category, position[x,y,z], peak_confidence, view_count, best_frame_index}
+
+    No deduplication here — collapse_duplicates inside _build_final_objects
+    handles cross-source duplicates.
+    """
+    merged = list(phone_yolo or [])
+    merged.extend(backend_rgb or [])
+    return merged
+
+
 def _build_final_objects(
     slm_objects: List[Any],
     yolo_objects_3d: List[Dict[str, Any]],
@@ -815,12 +833,39 @@ def run_phone_first_pipeline(
         manhattan_yaw=manhattan_yaw,
     )
 
+    # Plan 3c: backend open-vocab RGB detection on the keyframe JPEGs.
+    # SpatialLM can't detect furniture from phone-built monocular-depth
+    # PLYs (training distribution mismatch); Grounding DINO on the RGB
+    # keyframes does. Lifted to 3D via PLY raycast and clustered across
+    # frames before feeding into the consensus pipeline.
+    from .keyframe_clustering import cluster_keyframe_detections
+    from .raycast_lift import keyframe_metas_from_manifest, lift_detections_to_3d
+    from .rgb_detection import detect_furniture_in_keyframes
+
+    rgb_clusters: List[Dict[str, Any]] = []
+    try:
+        rgb_dets_2d = detect_furniture_in_keyframes(payload.keyframe_jpegs)
+        if rgb_dets_2d:
+            metas = keyframe_metas_from_manifest(payload.keyframes_manifest)
+            lifted = lift_detections_to_3d(rgb_dets_2d, positions, metas)
+            rgb_clusters = cluster_keyframe_detections(lifted)
+            logger.info(
+                "Plan 3c: %d 2D detections -> %d 3D clusters",
+                len(rgb_dets_2d), len(rgb_clusters),
+            )
+    except Exception as e:
+        logger.warning("Plan 3c RGB detection failed: %s -- continuing without", e)
+
+    combined_detections = _merge_phone_and_backend_detections(
+        payload.yolo_objects, rgb_clusters,
+    )
+
     # Plan 3b consensus pipeline: take the SLM-mapped objects and the
-    # phone's deduped 3D YOLO objects, run them through the four polish
-    # functions, and emit final RoomObjects with meaningful confidence.
+    # combined phone-YOLO + backend-RGB 3D detections, run them through
+    # the four polish functions, and emit final RoomObjects.
     objects = _build_final_objects(
         slm_objects or [],
-        payload.yolo_objects,
+        combined_detections,
         phone_walls_with_openings,
     )
 
