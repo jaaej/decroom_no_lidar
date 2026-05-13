@@ -2,9 +2,10 @@
 //  PointCloudAccumulator.swift
 //  decroom_no_lidar
 //
-//  Accumulates world-space 3D points from unprojected depth maps.
-//  Voxel-deduplicates at configurable grid resolution. Caps total
-//  points to bound memory. Exports as binary PLY for backend upload.
+//  Accumulates world-space 3D points from unprojected metric depth maps
+//  (meters, from DepthRunner). Voxel-deduplicates at configurable grid
+//  resolution. Caps total points to bound memory. Exports as binary PLY
+//  for backend upload.
 //
 
 import Foundation

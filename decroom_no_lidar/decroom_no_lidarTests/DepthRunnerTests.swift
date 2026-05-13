@@ -15,13 +15,14 @@ struct DepthRunnerTests {
         #expect(result.depths.count == result.width * result.height)
     }
 
-    @Test func depthsAreFinite() throws {
+    @Test func depthsAreFiniteAndInMetricRange() throws {
         let runner = try DepthRunner()
         let buffer = makeTestPixelBuffer(width: 518, height: 392)
         let result = try runner.infer(pixelBuffer: buffer)
-        // Relative depth: values should be finite (NaN/Inf would indicate model error).
-        let allFinite = result.depths.allSatisfy { $0.isFinite }
-        #expect(allFinite)
+        // Metric depth: finite and non-negative. A zero-filled buffer may
+        // produce low-confidence values; real-scene quality is validated
+        // in manual QA, not here.
+        #expect(result.depths.allSatisfy { $0.isFinite && $0 >= 0 })
     }
 
     @Test func thermalThrottleDropsFrameRate() {

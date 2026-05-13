@@ -12,6 +12,7 @@ venv/
 
 # Exception: bundle the on-device Core ML depth model weights
 !decroom_no_lidar/DepthModel.mlpackage/**/*.bin
+!decroom_no_lidar/YOLOv8s-seg.mlpackage/**/*.bin
 
 # macOS
 .DS_Store

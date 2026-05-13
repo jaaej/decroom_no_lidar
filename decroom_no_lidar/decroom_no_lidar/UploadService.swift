@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import UIKit
 
 enum UploadError: Error, LocalizedError {
     case imageConversionFailed
@@ -108,185 +107,139 @@ struct UploadService {
         throw UploadError.noServerFound
     }
 
-    /// Upload from disk-based JPEG files (video mode) — avoids holding CGImages in memory.
-    static func uploadFromDisk(
-        jpegPaths: [URL],
-        metadataJSON: String?
-    ) async throws -> RoomPayload {
-        let url = try await resolveUploadURL()
-        print("[UploadService] Uploading \(jpegPaths.count) keyframes from disk to \(url.absoluteString)")
+    // MARK: - Phone-first upload (Plan 3a)
+
+    /// Upload a phone-first payload: geometry JSON, PLY, keyframes + manifest,
+    /// scan log. Maps backend 4xx/5xx/network errors into `ScanError` cases.
+    static func uploadPhoneFirst(_ payload: ScanUploadPayload) async throws -> RoomPayload {
+        let url: URL
+        do {
+            url = try await resolvePhoneFirstUploadURL()
+        } catch let e as ScanError {
+            throw e
+        } catch {
+            throw ScanError.uploadNoServer
+        }
+        print("[UploadService] Phone-first upload → \(url.absoluteString) (scan=\(payload.scanID))")
 
         let boundary = UUID().uuidString
 
-        // Build multipart body OFF the main thread — reads JPEGs from disk one at a time
-        let body: Data = try await Task.detached(priority: .userInitiated) {
-            var bodyData = Data()
-
-            for (index, jpegURL) in jpegPaths.enumerated() {
-                let jpegData = try Data(contentsOf: jpegURL)
-
-                bodyData.append("--\(boundary)\r\n")
-                bodyData.append("Content-Disposition: form-data; name=\"frames\"; filename=\"frame_\(index).jpg\"\r\n")
-                bodyData.append("Content-Type: image/jpeg\r\n\r\n")
-                bodyData.append(jpegData)
-                bodyData.append("\r\n")
-            }
-
-            if let metadata = metadataJSON, let metaData = metadata.data(using: .utf8) {
-                bodyData.append("--\(boundary)\r\n")
-                bodyData.append("Content-Disposition: form-data; name=\"metadata\"; filename=\"metadata.json\"\r\n")
-                bodyData.append("Content-Type: application/json\r\n\r\n")
-                bodyData.append(metaData)
-                bodyData.append("\r\n")
-            }
-
-            bodyData.append("--\(boundary)--\r\n")
-            return bodyData
-        }.value
+        // Build multipart body off-thread (JPEG concat is cheap but keep main responsive).
+        let body: Data
+        do {
+            body = try await Task.detached(priority: .userInitiated) {
+                try UploadService._buildPhoneFirstMultipartBody(payload, boundary: boundary)
+            }.value
+        } catch {
+            throw ScanError.payloadBuildFailed(
+                detail: "multipart build: \(error.localizedDescription)"
+            )
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = uploadTimeoutSeconds
+        request.timeoutInterval = 60  // was 1800 for old SfM path; 60s is plenty for SpatialLM
         request.httpBody = body
 
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = uploadTimeoutSeconds
-        configuration.timeoutIntervalForResource = uploadTimeoutSeconds
-        configuration.allowsExpensiveNetworkAccess = true
-        configuration.allowsConstrainedNetworkAccess = true
-        let session = URLSession(configuration: configuration)
-        defer {
-            session.finishTasksAndInvalidate()
-        }
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 60
+        let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
 
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
-        } catch let error as URLError where error.code == .timedOut {
-            throw UploadError.serverError(
-                "Upload timed out after \(Int(uploadTimeoutSeconds))s. " +
-                "If SfM/BA is enabled, disable it for quick tests or keep this request running longer."
-            )
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw UploadError.serverError("No HTTP response")
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown"
-            throw UploadError.serverError("HTTP \(httpResponse.statusCode): \(errorBody)")
-        }
-
-        if let jsonStr = String(data: data, encoding: .utf8) {
-            try? jsonStr.write(
-                to: URL(fileURLWithPath: "/tmp/decroom_payload.json"),
-                atomically: true,
-                encoding: .utf8
-            )
-        }
-
-        do {
-            let payload = try JSONDecoder().decode(RoomPayload.self, from: data)
-            return payload
+        } catch let err as URLError where err.code == .timedOut {
+            throw ScanError.uploadTimeout
         } catch {
-            throw UploadError.decodingFailed(error.localizedDescription)
+            throw ScanError.uploadNoServer
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw ScanError.backendServerError(status: -1, detail: "non-HTTP response")
+        }
+
+        switch http.statusCode {
+        case 200:
+            do {
+                return try JSONDecoder().decode(RoomPayload.self, from: data)
+            } catch {
+                throw ScanError.backendSchemaError(
+                    scanID: payload.scanID,
+                    detail: "response decode: \(error.localizedDescription)"
+                )
+            }
+        case 400..<500:
+            let body = String(data: data, encoding: .utf8) ?? "(unparseable body)"
+            throw ScanError.backendSchemaError(scanID: payload.scanID, detail: body)
+        default:
+            let body = String(data: data, encoding: .utf8) ?? "(unparseable body)"
+            throw ScanError.backendServerError(status: http.statusCode, detail: body)
         }
     }
 
-    static func upload(
-        images: [CGImage],
-        metadataJSON: String?
-    ) async throws -> RoomPayload {
-        let url = try await resolveUploadURL()
-        print("[UploadService] Uploading to \(url.absoluteString)")
+    /// Resolves the phone-first upload URL (Bonjour first, fallback second).
+    /// Swaps the path component to `/api/upload/phone-first`.
+    private static func resolvePhoneFirstUploadURL() async throws -> URL {
+        let base = try await resolveUploadURL()
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw ScanError.uploadNoServer
+        }
+        components.path = "/api/upload/phone-first"
+        components.query = nil
+        guard let url = components.url else {
+            throw ScanError.uploadNoServer
+        }
+        return url
+    }
 
-        let boundary = UUID().uuidString
-
-        // Build multipart body OFF the main thread — JPEG encoding is expensive
-        let body: Data = try await Task.detached(priority: .userInitiated) {
-            var bodyData = Data()
-
-            for (index, cgImage) in images.enumerated() {
-                let uiImage = UIImage(cgImage: cgImage)
-                guard let jpegData = uiImage.jpegData(compressionQuality: 0.75) else {
-                    throw UploadError.imageConversionFailed
-                }
-
-                bodyData.append("--\(boundary)\r\n")
-                bodyData.append("Content-Disposition: form-data; name=\"frames\"; filename=\"frame_\(index).jpg\"\r\n")
-                bodyData.append("Content-Type: image/jpeg\r\n\r\n")
-                bodyData.append(jpegData)
-                bodyData.append("\r\n")
-            }
-
-            if let metadata = metadataJSON, let metaData = metadata.data(using: .utf8) {
-                bodyData.append("--\(boundary)\r\n")
-                bodyData.append("Content-Disposition: form-data; name=\"metadata\"; filename=\"metadata.json\"\r\n")
-                bodyData.append("Content-Type: application/json\r\n\r\n")
-                bodyData.append(metaData)
-                bodyData.append("\r\n")
-            }
-
-            bodyData.append("--\(boundary)--\r\n")
-            return bodyData
-        }.value
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = uploadTimeoutSeconds
-        request.httpBody = body
-
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = uploadTimeoutSeconds
-        configuration.timeoutIntervalForResource = uploadTimeoutSeconds
-        configuration.allowsExpensiveNetworkAccess = true
-        configuration.allowsConstrainedNetworkAccess = true
-        let session = URLSession(configuration: configuration)
-        defer {
-            session.finishTasksAndInvalidate()
+    /// Exposed for tests — builds the multipart body without a network call.
+    static func _buildPhoneFirstMultipartBody(
+        _ payload: ScanUploadPayload,
+        boundary: String
+    ) throws -> Data {
+        var data = Data()
+        func appendPart(name: String, filename: String,
+                         contentType: String, bytes: Data) {
+            data.append("--\(boundary)\r\n")
+            data.append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
+            data.append("Content-Type: \(contentType)\r\n\r\n")
+            data.append(bytes)
+            data.append("\r\n")
         }
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch let error as URLError where error.code == .timedOut {
-            throw UploadError.serverError(
-                "Upload timed out after \(Int(uploadTimeoutSeconds))s. " +
-                "If SfM/BA is enabled, disable it for quick tests or keep this request running longer."
-            )
-        }
+        let manifestJSON = try ScanUploadPayload.encodeKeyframesManifest(
+            payload.keyframes.map { $0.meta }
+        )
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw UploadError.serverError("No HTTP response")
+        appendPart(name: "room_geometry", filename: "room_geometry.json",
+                    contentType: "application/json",
+                    bytes: payload.roomGeometryJSON)
+        appendPart(name: "point_cloud", filename: "point_cloud.ply",
+                    contentType: "application/octet-stream",
+                    bytes: payload.pointCloudPLY)
+        appendPart(name: "keyframes_manifest", filename: "keyframes.json",
+                    contentType: "application/json",
+                    bytes: manifestJSON)
+        for (i, kf) in payload.keyframes.enumerated() {
+            appendPart(name: "keyframes", filename: kf.meta.filename.isEmpty
+                                                     ? "frame_\(i).jpg"
+                                                     : kf.meta.filename,
+                        contentType: "image/jpeg",
+                        bytes: kf.jpeg)
         }
+        appendPart(name: "scan_log", filename: "scan_log.json",
+                    contentType: "application/json",
+                    bytes: payload.scanLogJSON)
+        appendPart(name: "yolo_objects", filename: "yolo_objects.json",
+                    contentType: "application/json",
+                    bytes: payload.yoloObjectsJSON)
 
-        guard httpResponse.statusCode == 200 else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown"
-            throw UploadError.serverError("HTTP \(httpResponse.statusCode): \(errorBody)")
-        }
-
-        // Write raw response for debugging
-        if let jsonStr = String(data: data, encoding: .utf8) {
-            try? jsonStr.write(
-                to: URL(fileURLWithPath: "/tmp/decroom_payload.json"),
-                atomically: true,
-                encoding: .utf8
-            )
-        }
-
-        do {
-            let payload = try JSONDecoder().decode(RoomPayload.self, from: data)
-            return payload
-        } catch {
-            throw UploadError.decodingFailed(error.localizedDescription)
-        }
+        data.append("--\(boundary)--\r\n")
+        return data
     }
 }
 

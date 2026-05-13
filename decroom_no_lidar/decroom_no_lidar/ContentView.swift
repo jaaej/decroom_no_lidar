@@ -12,507 +12,6 @@ import CoreImage
 import AVFoundation
 import Accelerate
 
-struct ContentView: View {
-    @ObservedObject var processor: RecordingProcessor
-
-    var body: some View {
-        GuidedCaptureView(processor: processor)
-    }
-}
-
-// MARK: - Guided Capture (Coverage-Driven)
-
-struct GuidedCaptureView: View {
-    @StateObject private var recorder = GuidedARFrameRecorder()
-    @StateObject private var coverage = CoverageEngine()
-    @ObservedObject var processor: RecordingProcessor
-    @State private var lastError: String?
-    @State private var showPreview = false
-    @State private var justCaptured = false
-    @State private var isCapturing = false
-
-    private struct ReadinessCheck {
-        let label: String
-        let passed: Bool
-        let detail: String
-    }
-
-    var body: some View {
-        ZStack {
-            // LAYER 1: Full-screen AR camera
-            GuidedARViewContainer(recorder: recorder)
-                .ignoresSafeArea()
-
-            // LAYER 2: Coverage checklist overlay + directional chevron
-            ScanGuidanceOverlayView(
-                capturedCount: coverage.capturedCount,
-                minimumShots: coverage.minimumShots,
-                isWalkedAround: coverage.spatialClusterCount >= coverage.requiredSpatialClustersForUpload
-                             || coverage.maxDistanceFromStart >= coverage.requiredTravelDistanceForUpload,
-                isMultipleAngles: coverage.uniqueYawBinCount >= 6
-                                && coverage.largestYawGap <= .pi,
-                isCapturedDetail: coverage.goodFeatureShots >= 3
-                                || coverage.featureVoxelCount >= 300,
-                isReadyToUpload: coverage.isReadyToUpload,
-                turnAngle: (coverage.nextSequenceYaw ?? coverage.largestGapCenterYaw).map {
-                    normalizeAngle($0 - recorder.smoothedYaw)
-                },
-                largestGap: coverage.largestYawGap,
-                dynamicPrompt: livePolicyHint
-            )
-
-            // LAYER 3: Bottom controls panel
-            VStack(spacing: 0) {
-                Spacer()
-
-                // BOTTOM: Compact controls panel
-                VStack(spacing: 6) {
-                    // Single-line hint or error
-                    if let lastError {
-                        Label(lastError, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                            .lineLimit(1)
-                    } else {
-                        compactHint
-                    }
-
-                    // Buttons row
-                    HStack(spacing: 12) {
-                        Button {
-                            captureShot()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "camera.circle.fill")
-                                    .font(.title3)
-                                Text("Capture")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(captureButtonColor)
-                        .disabled(!coverage.canCapture() || isCapturing)
-
-                        Button("Upload Now") {
-                            let result = recorder.stop()
-                            processor.processCapturedFrames(result.frames, metadataJSON: result.metadataJSON)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!coverage.isReadyToUpload)
-                    }
-
-                    readinessChecksView
-                    statusSection
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial)
-            }
-
-            // Flash overlay on capture
-            if justCaptured {
-                Color.white
-                    .opacity(0.3)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-                    .ignoresSafeArea()
-            }
-        }
-        .onAppear {
-            recorder.start()
-            coverage.reset()
-        }
-        .onDisappear {
-            recorder.stop()
-        }
-        .onChange(of: recorder.currentYaw) { _, _ in
-            let pos = SIMD3<Float>(
-                recorder.latestCameraTransform.columns.3.x,
-                recorder.latestCameraTransform.columns.3.y,
-                recorder.latestCameraTransform.columns.3.z
-            )
-            DispatchQueue.main.async {
-                coverage.updateLiveState(position: pos, timestamp: CACurrentMediaTime())
-            }
-        }
-        .navigationDestination(isPresented: $showPreview) {
-            if case .finished(let payload) = processor.state {
-                RoomPreviewPage(payload: payload, processor: processor)
-            }
-        }
-    }
-
-    // MARK: - Capture Button Color
-
-    private var captureButtonColor: Color {
-        if !coverage.canCapture() || isCapturing { return .gray }
-        if recorder.currentTrackingQuality != "normal" { return .orange }
-        if let policy = liveCapturePolicy, policy.overlapScore < coverage.minOverlapPolicyScore {
-            return .yellow
-        }
-        return .blue
-    }
-
-    // MARK: - Compact Hint (single line)
-
-    @ViewBuilder
-    private var compactHint: some View {
-        if coverage.capturedCount == 0 {
-            Text("Point at the room and tap Capture")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else if isGoodAngle {
-            Label("Good angle", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
-        } else if recorder.currentTrackingQuality != "normal" {
-            Label("Tracking is limited. You can still capture; hold steady.", systemImage: "hand.raised")
-                .font(.caption)
-                .foregroundStyle(.orange)
-        } else if let liveHint = livePolicyHint {
-            Label(liveHint, systemImage: "scope")
-                .font(.caption)
-                .foregroundStyle(.yellow)
-        } else if coverage.isReadyToUpload {
-            Label("Good coverage! Tap Upload Now", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
-        } else {
-            Text(missingCoverageHint)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// Single-line hint matching the first unchecked checklist item
-    private var missingCoverageHint: String {
-        if coverage.capturedCount < coverage.minimumShots {
-            return "Take \(coverage.minimumShots - coverage.capturedCount) more photos"
-        }
-        if coverage.spatialClusterCount < coverage.requiredSpatialClustersForUpload {
-            return "Walk to another spot in the room"
-        }
-        if coverage.maxDistanceFromStart < coverage.requiredTravelDistanceForUpload {
-            return "Move further across the room"
-        }
-        if coverage.uniqueYawBinCount < 6 || coverage.largestYawGap > .pi {
-            return "Turn to face other walls"
-        }
-        if coverage.goodFeatureShots < 3 && coverage.featureVoxelCount < 300 {
-            return "Point at furniture or textured surfaces"
-        }
-        if coverage.goodFeatureSpreadShots < coverage.minFeatureSpreadShots
-            && coverage.averageFeatureSpreadCoverage < 0.22
-            && coverage.capturedCount < 16 {
-            return "Pan across uncovered image regions before upload"
-        }
-        return "Keep capturing from new angles"
-    }
-
-    private var isGoodAngle: Bool {
-        guard let target = coverage.nextSequenceYaw ?? coverage.largestGapCenterYaw else {
-            return false
-        }
-        let delta = abs(normalizeAngle(target - recorder.smoothedYaw))
-        return delta <= (.pi / 12) // ±15°
-    }
-
-    private var liveCapturePolicy: CoverageEngine.CapturePolicyFeedback? {
-        guard coverage.capturedCount > 0 else { return nil }
-        let position = SIMD3<Float>(
-            recorder.latestCameraTransform.columns.3.x,
-            recorder.latestCameraTransform.columns.3.y,
-            recorder.latestCameraTransform.columns.3.z
-        )
-        return coverage.previewCapturePolicy(
-            yaw: recorder.currentYaw,
-            pitch: recorder.currentPitch,
-            position: position,
-            featurePointCount: recorder.currentFeaturePointCount,
-            trackingQuality: recorder.currentTrackingQuality
-        )
-    }
-
-    private var livePolicyHint: String? {
-        guard let policy = liveCapturePolicy else { return nil }
-        if policy.requiresStabilizingShot, let step = policy.stepM {
-            return String(format: "Large move (%.2fm). Take one intermediate overlap shot.", step)
-        }
-        if policy.overlapScore < coverage.minOverlapPolicyScore {
-            return "Rotate less and capture sooner for stronger overlap."
-        }
-        if policy.textureScore < 0.25 {
-            return "Aim at textured/edge-rich areas before capture."
-        }
-        return nil
-    }
-
-    private var readinessChecks: [ReadinessCheck] {
-        [
-            ReadinessCheck(
-                label: "Shots",
-                passed: coverage.capturedCount >= coverage.minimumShots,
-                detail: "\(coverage.capturedCount)/\(coverage.minimumShots)"
-            ),
-            ReadinessCheck(
-                label: "Yaw bins",
-                passed: coverage.uniqueYawBinCount >= 10,
-                detail: "\(coverage.uniqueYawBinCount)/10"
-            ),
-            ReadinessCheck(
-                label: "Movement",
-                passed: coverage.spatialClusterCount >= coverage.requiredSpatialClustersForUpload,
-                detail: "\(coverage.spatialClusterCount)/\(coverage.requiredSpatialClustersForUpload)"
-            ),
-            ReadinessCheck(
-                label: "Travel",
-                passed: coverage.maxDistanceFromStart >= coverage.requiredTravelDistanceForUpload,
-                detail: String(format: "%.2fm", coverage.maxDistanceFromStart)
-            ),
-            ReadinessCheck(
-                label: "Detail",
-                passed: coverage.goodFeatureShots >= 4 || coverage.featureVoxelCount >= 450,
-                detail: "\(coverage.goodFeatureShots) shots / \(coverage.featureVoxelCount) voxels"
-            ),
-            ReadinessCheck(
-                label: "Spread",
-                passed: coverage.goodFeatureSpreadShots >= coverage.minFeatureSpreadShots
-                     || coverage.averageFeatureSpreadCoverage >= 0.22
-                     || coverage.capturedCount >= 16,
-                detail: "\(coverage.goodFeatureSpreadShots)/\(coverage.minFeatureSpreadShots) shots / \(Int((coverage.averageFeatureSpreadCoverage * 100).rounded()))%"
-            )
-        ]
-    }
-
-    @ViewBuilder
-    private var readinessChecksView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Upload Readiness")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            ForEach(Array(readinessChecks.enumerated()), id: \.offset) { _, check in
-                HStack(spacing: 6) {
-                    Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle")
-                        .foregroundStyle(check.passed ? .green : .orange)
-                        .font(.caption2)
-                    Text("\(check.label): \(check.detail)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-        }
-    }
-
-    // MARK: - Capture Action
-
-    private func captureShot() {
-        if isCapturing { return }
-        let position = SIMD3<Float>(
-            recorder.latestCameraTransform.columns.3.x,
-            recorder.latestCameraTransform.columns.3.y,
-            recorder.latestCameraTransform.columns.3.z
-        )
-
-        let policy = coverage.previewCapturePolicy(
-            yaw: recorder.currentYaw,
-            pitch: recorder.currentPitch,
-            position: position,
-            featurePointCount: recorder.currentFeaturePointCount,
-            trackingQuality: recorder.currentTrackingQuality
-        )
-        if policy.isSequenceBreak {
-            if let step = policy.stepM, let yawDelta = policy.yawDeltaDeg {
-                lastError = String(
-                    format: "Continuity break (%.2fm, %.0f°). Take one intermediate overlap shot.",
-                    step,
-                    yawDelta
-                )
-            } else {
-                lastError = "Continuity break. Take one intermediate overlap shot."
-            }
-            return
-        }
-        if policy.requiresStabilizingShot {
-            if let step = policy.stepM {
-                lastError = String(format: "Large camera jump (%.2fm). Take one intermediate overlap shot first.", step)
-            } else {
-                lastError = "Large camera jump. Take one intermediate overlap shot first."
-            }
-            return
-        }
-        if coverage.capturedCount >= 2 && policy.overlapScore < 0.16 {
-            lastError = "Very low overlap predicted. Rotate 10–30° from the last shot and capture again."
-            return
-        }
-        if policy.textureScore < 0.18 {
-            lastError = "Low-detail view. Capture accepted, but include textured overlap next."
-        }
-
-        // Check capture gating
-        if let reason = coverage.canCaptureHere(
-            yaw: recorder.currentYaw,
-            pitch: recorder.currentPitch,
-            position: position,
-            featurePointCount: recorder.currentFeaturePointCount
-        ) {
-            var shouldBlockCapture = true
-            switch reason {
-            case .tooCloseAngular:
-                lastError = "Too similar to a previous shot. Turn about 20–30° and capture."
-            case .tooCloseSpatial:
-                lastError = "Too close to an existing capture. Shift a little or rotate further."
-            case .insufficientFeatures:
-                lastError = "Low detail in view. Capture accepted, but include textured surfaces next."
-                shouldBlockCapture = false
-            case .movingTooFast:
-                lastError = "Hold still \u{2014} moving too fast."
-            case .outOfSequence:
-                lastError = "Not ideal order. Capture accepted; rotate toward the guidance arrow next."
-                shouldBlockCapture = false
-            }
-            if shouldBlockCapture {
-                return
-            }
-        }
-
-        isCapturing = true
-
-        // Capture the frame (image processing happens on background thread)
-        recorder.captureAsync(
-            motionOverlapScore: policy.overlapScore,
-            sequenceBreakFlag: policy.isSequenceBreak
-        ) { result in
-            switch result {
-            case .success(let capture):
-                if policy.textureScore >= 0.18 && policy.overlapScore >= coverage.minOverlapPolicyScore {
-                    lastError = nil
-                }
-                coverage.addCapture(
-                    yaw: capture.yaw,
-                    pitch: capture.pitch,
-                    position: capture.position,
-                    featurePoints: capture.featurePoints,
-                    featureImageCoverage: capture.featureImageCoverage,
-                    featureGridCellCount: capture.featureGridCellCount,
-                    trackingQuality: recorder.currentTrackingQuality
-                )
-
-                // LiDAR mode: snapshot mesh only at capture time.
-                // Non-LiDAR fallback: place capture marker only.
-                if recorder.supportsSceneMesh {
-                    recorder.snapshotNearbyMesh(at: capture.cameraTransform)
-                } else {
-                    recorder.addCaptureMarker(at: capture.cameraTransform)
-                }
-
-                // Brief flash effect
-                withAnimation(.easeOut(duration: 0.15)) {
-                    justCaptured = true
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    withAnimation(.easeIn(duration: 0.1)) {
-                        justCaptured = false
-                    }
-                }
-
-            case .failure(let error):
-                lastError = errorMessage(error)
-            }
-            isCapturing = false
-        }
-    }
-
-    // MARK: - Status Section
-
-    @ViewBuilder
-    private var statusSection: some View {
-        switch processor.state {
-        case .idle:
-            EmptyView()
-        case .extracting:
-            HStack(spacing: 8) {
-                ProgressView()
-                Text("Extracting frames...")
-            }
-        case .uploading:
-            HStack(spacing: 8) {
-                ProgressView()
-                Text("Uploading to backend...")
-            }
-        case .finished:
-            Button {
-                showPreview = true
-            } label: {
-                Label("View 3D Room", systemImage: "cube.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Processing failed", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                Text(message)
-                    .font(.subheadline)
-                Button("Try again") {
-                    processor.reset()
-                }
-            }
-        }
-    }
-
-    private func errorMessage(_ error: GuidedARFrameRecorder.CaptureError) -> String {
-        switch error {
-        case .noFrame:
-            return "No AR frame yet. Hold steady and try again."
-        case .blurry:
-            return "Shot is too blurry. Hold steady and retry."
-        case .dark:
-            return "Shot is too dark. Add light or tilt toward brighter area."
-        }
-    }
-}
-
-// MARK: - Room Preview Page (Separate Navigation Destination)
-
-struct RoomPreviewPage: View {
-    let payload: RoomPayload
-    @ObservedObject var processor: RecordingProcessor
-
-    var body: some View {
-        VStack(spacing: 16) {
-            RoomSceneView(payload: payload)
-                .frame(maxHeight: .infinity)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("\(payload.objects.count) objects", systemImage: "chair.lounge")
-                    Spacer()
-                    Label(
-                        "\(String(format: "%.1f", payload.envelope.width))m x \(String(format: "%.1f", payload.envelope.length))m x \(String(format: "%.1f", payload.envelope.height))m",
-                        systemImage: "ruler"
-                    )
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-        }
-        .padding()
-        .navigationTitle("Room Preview")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Reset") {
-                    processor.reset()
-                }
-            }
-        }
-    }
-}
-
-// MARK: - AR View Container
-
 struct GuidedARViewContainer: UIViewRepresentable {
     @ObservedObject var recorder: GuidedARFrameRecorder
 
@@ -628,10 +127,6 @@ final class GuidedARFrameRecorder: ObservableObject {
     /// Callback invoked on main thread when a keyframe is accepted in video mode
     var onKeyframeCaptured: ((CaptureData) -> Void)?
 
-    /// Downsampled keyframe thumbnails for panoramic mosaic display (video mode only).
-    /// Each entry is ~480KB (300×400×4), so 100 keyframes ≈ 48MB — acceptable.
-    @Published private(set) var keyframeThumbnails: [(image: CGImage, yaw: Float)] = []
-
     // AR scene feedback
     weak var arView: ARView?
     private var markerRootAnchor: AnchorEntity?
@@ -657,6 +152,10 @@ final class GuidedARFrameRecorder: ObservableObject {
     private var frames: [CGImage] = []
     private var shots: [GuidedShotPayload] = []
     private var latestFrame: ARFrame?
+    /// On-device phone-first session. Accumulates geometry, point cloud,
+    /// and keyframes in parallel with the existing video capture. Created
+    /// lazily on start() so the heavy model loads don't happen at app launch.
+    private(set) var scanSession: ScanSession?
     private let ciContext = CIContext()
     private var shotCounter: Int = 0
     private var lastCapturePosition: SIMD3<Float>? = nil
@@ -671,6 +170,7 @@ final class GuidedARFrameRecorder: ObservableObject {
     }
 
     func start() {
+        scanSession = ScanSession()
         clearScanFeedback()
         frames = []
         shots = []
@@ -694,7 +194,6 @@ final class GuidedARFrameRecorder: ObservableObject {
         lastKeyframeTime = 0
         videoFrameCount = 0
         keyframeJPEGPaths = []
-        keyframeThumbnails = []
         scanStartTime = 0
 
         if isVideoMode {
@@ -704,9 +203,21 @@ final class GuidedARFrameRecorder: ObservableObject {
         isRecording = true
     }
 
+    /// Continue an existing scan after a pause (user tapped "Resume" from
+    /// an error alert, or "More" after stopping). Unlike start(), this
+    /// does NOT wipe frames/shots/keyframeJPEGPaths — so everything the
+    /// user has already captured is preserved.
+    func resume() {
+        if isVideoMode {
+            lockExposureAndFocus()
+        }
+        isRecording = true
+    }
+
     @discardableResult
     func stop() -> CaptureResult {
         isRecording = false
+        // Keep scanSession alive — caller will invoke finalize() before releasing.
         if isVideoMode {
             unlockExposureAndFocus()
         }
@@ -722,11 +233,89 @@ final class GuidedARFrameRecorder: ObservableObject {
     /// Returns a CaptureResult using disk-based keyframe JPEGs (video mode)
     func stopVideoMode() -> (jpegPaths: [URL], metadataJSON: String?) {
         isRecording = false
+        // Keep scanSession alive — caller will invoke finalize() before releasing.
         unlockExposureAndFocus()
         let ordered = shots.sorted { $0.timestamp < $1.timestamp }
         let metadataJSON = buildMetadataJSON(shots: ordered)
         clearScanFeedback()
         return (jpegPaths: keyframeJPEGPaths, metadataJSON: metadataJSON)
+    }
+
+    /// Build and return the phone-first upload payload. Must be called after
+    /// stopVideoMode() (so keyframeJPEGPaths are finalized). On any phone-side
+    /// validation failure, throws a ScanError.
+    @MainActor
+    func finalizePhoneFirstPayload() async throws -> ScanUploadPayload {
+        guard let session = scanSession else {
+            throw ScanError.payloadBuildFailed(
+                detail: "ScanSession missing — start() was never called?"
+            )
+        }
+
+        // keyframeJPEGPaths and shots are appended pairwise in video-mode
+        // capture; they are index-aligned. Read JPEG data from disk and build
+        // KeyframeMetadata from the matching shot.
+        var jpegs: [Data] = []
+        var metas: [ScanUploadPayload.KeyframeMetadata] = []
+
+        for (i, url) in keyframeJPEGPaths.enumerated() {
+            let data: Data
+            do {
+                data = try Data(contentsOf: url)
+            } catch {
+                throw ScanError.payloadBuildFailed(
+                    detail: "read keyframe \(url.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+
+            // Prefer the matching shot; fall back to iPhone 15 Pro portrait defaults
+            // if indexing doesn't line up (can happen in edge cases where some shots
+            // are photo-mode-only with no JPEG).
+            let shot: GuidedShotPayload? = (i < shots.count) ? shots[i] : nil
+            let intr: Intrinsics
+            let pose: simd_float4x4
+            let timestamp: Double
+
+            if let shot = shot {
+                intr = Intrinsics(
+                    fx: shot.intrinsics.fx,
+                    fy: shot.intrinsics.fy,
+                    cx: shot.intrinsics.cx,
+                    cy: shot.intrinsics.cy,
+                    width: shot.intrinsics.width,
+                    height: shot.intrinsics.height
+                )
+                pose = matrixFromRowMajor(shot.pose.matrix)
+                timestamp = shot.timestamp
+            } else {
+                intr = Intrinsics(fx: 1500, fy: 1500, cx: 720, cy: 960,
+                                   width: 1440, height: 1920)
+                pose = matrix_identity_float4x4
+                timestamp = 0
+            }
+
+            jpegs.append(data)
+            metas.append(ScanUploadPayload.KeyframeMetadata(
+                filename: "frame_\(String(format: "%02d", i)).jpg",
+                timestamp: timestamp,
+                poseWorldFromCamera: pose,
+                intrinsics: intr
+            ))
+        }
+
+        return try session.finalize(keyframes: metas, keyframeJPEGs: jpegs)
+    }
+
+    /// Reconstruct a simd_float4x4 from a row-major 16-float array.
+    /// Matches GuidedShotPayload.pose.matrix format produced by toRowMajorArray().
+    private func matrixFromRowMajor(_ m: [Float]) -> simd_float4x4 {
+        guard m.count == 16 else { return matrix_identity_float4x4 }
+        return simd_float4x4(
+            SIMD4<Float>(m[0],  m[4],  m[8],  m[12]),
+            SIMD4<Float>(m[1],  m[5],  m[9],  m[13]),
+            SIMD4<Float>(m[2],  m[6],  m[10], m[14]),
+            SIMD4<Float>(m[3],  m[7],  m[11], m[15])
+        )
     }
 
     /// Remove keyframe JPEG files from temp directory to prevent disk/privacy leaks.
@@ -796,6 +385,11 @@ final class GuidedARFrameRecorder: ObservableObject {
             guard let planeAnchor = anchor as? ARPlaneAnchor else { continue }
             livePlaneAnchors[planeAnchor.identifier] = planeAnchor
         }
+        // Also feed the phone-first room geometry builder
+        let planes = anchors.compactMap { $0 as? ARPlaneAnchor }
+        if !planes.isEmpty {
+            scanSession?.updatePlaneAnchors(planes)
+        }
     }
 
     func removePlaneAnchors(_ anchors: [ARAnchor]) {
@@ -803,6 +397,9 @@ final class GuidedARFrameRecorder: ObservableObject {
             guard let planeAnchor = anchor as? ARPlaneAnchor else { continue }
             livePlaneAnchors.removeValue(forKey: planeAnchor.identifier)
         }
+        // Re-send the surviving set so the geometry builder re-derives walls.
+        let surviving = Array(livePlaneAnchors.values)
+        scanSession?.updatePlaneAnchors(surviving)
     }
 
     func upsertMeshAnchors(_ anchors: [ARAnchor]) {
@@ -937,6 +534,9 @@ final class GuidedARFrameRecorder: ObservableObject {
                 evaluateKeyframeCandidate(frame: frame)
             }
         }
+
+        // Forward to phone-first pipeline (depth + geometry + keyframes)
+        scanSession?.update(frame: frame)
     }
 
     /// Capture the current frame asynchronously — image processing happens off the main thread
@@ -1441,24 +1041,7 @@ final class GuidedARFrameRecorder: ObservableObject {
                 )
             )
 
-            // Generate panorama thumbnail for video mode (off main thread)
-            var thumbnail: CGImage?
-            if isVideoModeCapture {
-                let thumbW = 300
-                let thumbH = 400
-                if let ctx = CGContext(
-                    data: nil, width: thumbW, height: thumbH,
-                    bitsPerComponent: 8, bytesPerRow: thumbW * 4,
-                    space: CGColorSpaceCreateDeviceRGB(),
-                    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-                ) {
-                    ctx.interpolationQuality = .medium
-                    ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: thumbW, height: thumbH))
-                    thumbnail = ctx.makeImage()
-                }
-            }
-
-            await MainActor.run { [cgImage, shot, thumbnail] in
+            await MainActor.run { [cgImage, shot] in
                 // Store JPEG path for disk-based upload
                 self.keyframeJPEGPaths.append(fileURL)
                 // Also keep shot metadata for upload
@@ -1466,10 +1049,6 @@ final class GuidedARFrameRecorder: ObservableObject {
                 // Only keep CGImage in memory for photo mode; video mode reads from disk
                 if !self.isVideoMode {
                     self.frames.append(cgImage)
-                }
-                // Store thumbnail for panoramic mosaic (video mode)
-                if let thumb = thumbnail {
-                    self.keyframeThumbnails.append((image: thumb, yaw: captureYaw))
                 }
                 self.capturedCount = self.isVideoMode ? self.keyframeJPEGPaths.count : self.frames.count
                 self.lastCapturePosition = cameraPosition
@@ -1943,6 +1522,3 @@ private extension simd_float4x4 {
     }
 }
 
-#Preview {
-    ContentView(processor: RecordingProcessor())
-}

@@ -9,7 +9,6 @@ import SwiftUI
 
 enum ScanMode: String, CaseIterable {
     case video = "Video Scan"
-    case photo = "Photo Capture"
     case furniture = "Scan Furniture"
 }
 
@@ -31,8 +30,37 @@ struct CaptureFlowView: View {
 
     var body: some View {
         NavigationStack {
-            VStack {
-                if case .idle = processor.state {
+            if DeviceCapabilities.currentTier == .fallback {
+                unsupportedDeviceView
+            } else {
+                mainCaptureBody
+            }
+        }
+    }
+
+    private var unsupportedDeviceView: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "iphone.slash")
+                .font(.system(size: 72))
+                .foregroundStyle(.secondary)
+            Text(ScanError.unsupportedDevice.message)
+                .font(.title3)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            if let goHome = goHome {
+                Button("Back to Home") {
+                    goHome()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var mainCaptureBody: some View {
+        VStack {
+            if case .idle = processor.state {
                     // Mode picker shown before capture starts
                     Picker("Scan Mode", selection: $scanMode) {
                         ForEach(ScanMode.allCases, id: \.self) { mode in
@@ -47,8 +75,6 @@ struct CaptureFlowView: View {
                 switch scanMode {
                 case .video:
                     VideoRecorderView(processor: processor)
-                case .photo:
-                    ContentView(processor: processor)
                 case .furniture:
                     FurnitureScanView()
                 }
@@ -155,7 +181,6 @@ struct CaptureFlowView: View {
                     }
                 }
             }
-        }
     }
 }
 

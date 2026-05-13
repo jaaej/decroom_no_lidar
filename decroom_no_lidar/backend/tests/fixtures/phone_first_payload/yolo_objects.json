@@ -1,0 +1,25 @@
+{
+  "objects": [
+    {
+      "category": "bed",
+      "position": [2.0, 0.0, 1.5],
+      "peak_confidence": 0.87,
+      "view_count": 12,
+      "best_frame_index": 34
+    },
+    {
+      "category": "chair",
+      "position": [3.5, 0.0, 2.8],
+      "peak_confidence": 0.71,
+      "view_count": 6,
+      "best_frame_index": 58
+    },
+    {
+      "category": "potted plant",
+      "position": [0.3, 0.0, 2.9],
+      "peak_confidence": 0.62,
+      "view_count": 3,
+      "best_frame_index": 67
+    }
+  ]
+}

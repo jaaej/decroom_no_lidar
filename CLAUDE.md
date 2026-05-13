@@ -25,12 +25,26 @@ python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 - USDZ Kenney models need bounding box measurement + median scale factor + Y-offset to floor
 - Do NOT make changes the user didn't ask for — no extra refactoring, no unsolicited docstrings
 
-## Architecture
-- Pipeline: iOS captures video keyframes → uploads JPEGs + metadata → FastAPI backend → RoomPayload JSON
-- SpatialLM path (primary): Depth backprojection → dense colored point cloud → PLY → remote GPU inference → walls + furniture
-- Heuristic fallback: Depth Anything V2 → YOLOv8-seg → ByteTrack → PCA layout → feature point lifting
-- COLMAP SfM is disabled when SpatialLM is enabled
+## Architecture (Phone-First — decided 2026-04-16)
+- **Design direction**: phone does geometry (ARKit planes + on-device depth), backend adds semantics only
+- **Current MVP capture**: VideoRecorderView (existing capture UI with coverage arc + upload)
+- **Backend**: SpatialLM for semantic labeling, YOLO for detection refinement
+- COLMAP SfM disabled when SpatialLM is enabled
 - 13 Kenney USDZ furniture models (CC0), mapped via `kenney_{type}.usdz`
+- **Design spec**: `docs/superpowers/specs/2026-04-16-phone-first-ar-architecture-design.md`
+- **Plan 1** (foundation): MERGED to main — DeviceCapabilities, ScanLogger, DepthRunner, RoomGeometryBuilder, PointCloudAccumulator, KeyframeSelector
+- **Plan 2** (visual capture): branch `feature/phone-first-visual` — code done but visual UI deferred, Tasks 11-12 pending
+- **Plans 3-4**: not started (backend integration + correction UI)
+
+## Important: Do NOT re-attempt these scanning UIs
+Multiple visual approaches for the scanning experience were tried and ALL failed:
+1. Panoramic mosaic (discrete tiles) — not seamless
+2. 3D wireframe grid shell — confusing, too small
+3. Floating AR reticle — too abstract
+4. Equirectangular panorama buffer — images distorted/sideways
+5. Flat panorama with edge blending — still looked tiled
+6. Text prompts + arrows — ambiguous
+See memory file `visual_ui_failures.md` for details. The current approach is functional MVP (VideoRecorderView).
 
 ## Worktree Rules
 - When recreating worktrees, add to `.gitignore`

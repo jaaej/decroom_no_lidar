@@ -2,9 +2,9 @@
 //  DepthRunner.swift
 //  decroom_no_lidar
 //
-//  Wraps Depth Anything V2 Small Core ML for on-device relative depth inference.
-//  Output is relative (not metric) — scale calibration happens downstream using
-//  ARKit feature point depths. Adjusts inference rate based on thermal state.
+//  Wraps Depth Anything V2 Metric Indoor Small Core ML for on-device
+//  metric depth inference. Output is in meters directly — no scale
+//  calibration needed. Adjusts inference rate based on thermal state.
 //
 
 import Foundation
@@ -14,8 +14,7 @@ import CoreVideo
 struct DepthResult {
     let width: Int
     let height: Int
-    /// Row-major width*height relative (unitless) depth values.
-    /// Scale calibration against ARKit feature points happens downstream.
+    /// Row-major width*height metric depth values in meters.
     let depths: [Float]
 }
 
@@ -36,14 +35,15 @@ final class DepthRunner {
 
     init() throws {
         let config = MLModelConfiguration()
-        config.computeUnits = .all  // Neural Engine if available
+        config.computeUnits = .all  // Neural Engine on device; CPU on simulator.
         guard let url = Bundle.main.url(forResource: "DepthModel", withExtension: "mlmodelc") else {
             throw DepthRunnerError.modelLoadFailed
         }
         self.model = try MLModel(contentsOf: url, configuration: config)
     }
 
-    /// Run inference on a pixel buffer. Returns relative depth map at the model's native resolution.
+    /// Run inference on a pixel buffer. Returns metric depth map (meters)
+    /// at the model's native resolution.
     func infer(pixelBuffer: CVPixelBuffer) throws -> DepthResult {
         let inputName = model.modelDescription.inputDescriptionsByName.keys.first ?? "image"
         let input = try MLDictionaryFeatureProvider(dictionary: [
@@ -78,9 +78,28 @@ final class DepthRunner {
 
         let count = multiArray.count
         var depths = [Float](repeating: 0, count: count)
-        let ptr = multiArray.dataPointer.assumingMemoryBound(to: Float.self)
-        for i in 0..<count {
-            depths[i] = ptr[i]
+
+        // The metric Depth Anything V2 model outputs Float16; the older
+        // relative variant outputs Float32. Handle both by checking the
+        // runtime dataType instead of assuming one or the other.
+        switch multiArray.dataType {
+        case .float16:
+            let ptr = multiArray.dataPointer.assumingMemoryBound(to: UInt16.self)
+            for i in 0..<count {
+                depths[i] = Float(Float16(bitPattern: ptr[i]))
+            }
+        case .float32:
+            let ptr = multiArray.dataPointer.assumingMemoryBound(to: Float.self)
+            for i in 0..<count {
+                depths[i] = ptr[i]
+            }
+        case .double:
+            let ptr = multiArray.dataPointer.assumingMemoryBound(to: Double.self)
+            for i in 0..<count {
+                depths[i] = Float(ptr[i])
+            }
+        default:
+            throw DepthRunnerError.unexpectedOutput
         }
 
         return DepthResult(width: width, height: height, depths: depths)

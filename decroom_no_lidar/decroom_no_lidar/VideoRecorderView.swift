@@ -12,118 +12,6 @@
 import SwiftUI
 import ARKit
 
-// MARK: - Panoramic Mosaic View
-
-/// Renders keyframe thumbnails arranged by yaw angle as a cylindrical panorama.
-/// The live camera feed shows through a transparent center window.
-/// Dark areas = uncaptured directions.
-struct PanoramaMosaicView: View {
-    let thumbnails: [(image: CGImage, yaw: Float)]
-    let currentYaw: Float
-    let isScanning: Bool
-
-    // Camera horizontal FOV in radians (~60° for iPhone wide lens)
-    private let cameraFOV: Float = 1.05  // ~60°
-
-    var body: some View {
-        Canvas { context, size in
-            let w = size.width
-            let h = size.height
-
-            // 1. Fill entire screen black (uncaptured areas)
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black.opacity(0.85)))
-
-            // 2. Pixels per radian — how wide one radian of yaw maps to on screen
-            let pixelsPerRadian = w / CGFloat(cameraFOV)
-
-            // 3. Draw keyframe thumbnails at their angular positions
-            let thumbWidth = w * 0.72   // slightly wider than center window for overlap
-            let thumbHeight = h * 0.78
-            let thumbY = h * 0.08
-
-            for thumb in thumbnails {
-                let relAngle = Self.normalizeAngle(thumb.yaw - currentYaw)
-
-                // Skip thumbnails far behind the camera
-                if abs(relAngle) > 2.8 { continue }
-
-                let centerX = w / 2 + CGFloat(relAngle) * pixelsPerRadian
-
-                let drawRect = CGRect(
-                    x: centerX - thumbWidth / 2,
-                    y: thumbY,
-                    width: thumbWidth,
-                    height: thumbHeight
-                )
-
-                // Only draw if at least partially on screen
-                guard drawRect.maxX > 0 && drawRect.minX < w else { continue }
-
-                // Draw the thumbnail with slight opacity fade at edges
-                let edgeFade = min(1.0, Double(2.0 - abs(relAngle)))
-                context.opacity = edgeFade
-                context.draw(
-                    Image(decorative: thumb.image, scale: 1),
-                    in: drawRect
-                )
-                context.opacity = 1.0
-            }
-
-            // 4. Cut out center window for live camera feed
-            // Rounded rectangle in the center — the ARView shows through here
-            let centerW = w * 0.68
-            let centerH = h * 0.72
-            let centerRect = CGRect(
-                x: (w - centerW) / 2,
-                y: (h - centerH) / 2,
-                width: centerW,
-                height: centerH
-            )
-
-            // Clear the center to show AR camera behind
-            context.blendMode = .clear
-            let cornerRadius: CGFloat = 16
-            context.fill(
-                Path(roundedRect: centerRect, cornerRadius: cornerRadius),
-                with: .color(.white)
-            )
-            context.blendMode = .normal
-
-            // 5. Draw thin border around center window
-            context.stroke(
-                Path(roundedRect: centerRect, cornerRadius: cornerRadius),
-                with: .color(.white.opacity(0.4)),
-                lineWidth: 1.5
-            )
-
-            // 6. Draw subtle grid lines on dark areas to show "empty space"
-            let gridSpacing: CGFloat = 40
-            context.blendMode = .normal
-            for x in stride(from: CGFloat(0), to: w, by: gridSpacing) {
-                var line = Path()
-                line.move(to: CGPoint(x: x, y: 0))
-                line.addLine(to: CGPoint(x: x, y: h))
-                context.stroke(line, with: .color(.white.opacity(0.03)), lineWidth: 0.5)
-            }
-            for y in stride(from: CGFloat(0), to: h, by: gridSpacing) {
-                var line = Path()
-                line.move(to: CGPoint(x: 0, y: y))
-                line.addLine(to: CGPoint(x: w, y: y))
-                context.stroke(line, with: .color(.white.opacity(0.03)), lineWidth: 0.5)
-            }
-        }
-        .allowsHitTesting(false)
-        .compositingGroup()
-    }
-
-    static func normalizeAngle(_ a: Float) -> Float {
-        var v = a
-        while v > .pi { v -= 2 * .pi }
-        while v < -.pi { v += 2 * .pi }
-        return v
-    }
-}
-
 // MARK: - Coverage Arc
 
 /// Blue arc at the bottom showing which yaw directions have been captured.
@@ -158,6 +46,18 @@ struct VideoRecorderView: View {
     @ObservedObject var processor: RecordingProcessor
     @State private var isScanning = false
     @State private var showSpeedWarning = false
+    @State private var activeError: ScanError? = nil
+    @State private var scanStartTime: Date? = nil
+    @State private var showNoWallsWarning = false
+    @State private var lastUploadedPayload: ScanUploadPayload? = nil
+
+    /// Number of frames being uploaded right now. Prefers the in-flight
+    /// payload's keyframe count (works for both fresh scans and
+    /// "Use Last Capture"); falls back to the recorder's live count for
+    /// the rare case the payload isn't set yet.
+    private var uploadFrameCount: Int {
+        lastUploadedPayload?.keyframes.count ?? recorder.capturedCount
+    }
 
     private var coveragePercent: Int {
         let filled = coverage.filledYawBins.count
@@ -166,27 +66,33 @@ struct VideoRecorderView: View {
 
     var body: some View {
         ZStack {
-            // LAYER 1: Live AR camera (shows through the center window)
+            // LAYER 1: Live AR camera — full-screen, no overlay
             GuidedARViewContainer(recorder: recorder)
                 .ignoresSafeArea()
 
-            // LAYER 2: Panoramic mosaic overlay
-            if isScanning || recorder.capturedCount > 0 {
-                PanoramaMosaicView(
-                    thumbnails: recorder.keyframeThumbnails,
-                    currentYaw: recorder.currentYaw,
-                    isScanning: isScanning
-                )
-                .ignoresSafeArea()
-            }
-
-            // LAYER 3: UI controls
+            // LAYER 2: UI controls
             VStack(spacing: 0) {
                 // Speed warning
                 if showSpeedWarning {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                         Text("Slow down")
+                    }
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.orange)
+                    .clipShape(Capsule())
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                // No-walls warning
+                if showNoWallsWarning {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text("No walls detected — look at wall edges, slow down")
                     }
                     .font(.subheadline.bold())
                     .foregroundStyle(.white)
@@ -246,6 +152,22 @@ struct VideoRecorderView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.white.opacity(0.15))
+
+                            if ScanUploadPayload.hasPersistedCapture {
+                                Button {
+                                    useLastCapture()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.up.doc")
+                                            .font(.caption)
+                                        Text("Use Last Capture").fontWeight(.semibold)
+                                    }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.white)
+                            }
 
                         } else if isScanning {
                             Button {
@@ -308,7 +230,7 @@ struct VideoRecorderView: View {
                 Color.black.opacity(0.6).ignoresSafeArea()
                 VStack(spacing: 16) {
                     ProgressView().scaleEffect(1.5).tint(.white)
-                    Text("Uploading \(recorder.capturedCount) frames...")
+                    Text("Uploading \(uploadFrameCount) frames...")
                         .font(.headline).foregroundStyle(.white)
                     Text("This may take a minute")
                         .font(.caption).foregroundStyle(.white.opacity(0.6))
@@ -327,6 +249,54 @@ struct VideoRecorderView: View {
                     Button("Retry") { upload() }.buttonStyle(.borderedProminent)
                     Button("Back") { processor.reset() }.foregroundStyle(.white)
                 }
+            }
+        }
+        .onChange(of: processor.state) { _, newState in
+            if case .failed(let msg) = newState {
+                activeError = Self.errorForMessage(msg)
+            }
+            // Persist the last successful upload for "Use Last Capture"
+            // (QA convenience). Only saves on .finished — errors and idle
+            // states don't overwrite.
+            if case .finished = newState,
+               let payload = lastUploadedPayload {
+                payload.saveAsLastCapture()
+            }
+        }
+        .alert(
+            isPresented: Binding(
+                get: { activeError != nil },
+                set: { if !$0 { activeError = nil } }
+            )
+        ) {
+            guard let err = activeError else {
+                return Alert(title: Text("Error"))
+            }
+            if err.isRetryable {
+                let retryLabel: String
+                switch err {
+                case .noWallsDetected, .insufficientCoverage:
+                    retryLabel = "Resume Scan"
+                default:
+                    retryLabel = "Retry"
+                }
+                return Alert(
+                    title: Text("Scan Error"),
+                    message: Text(err.message),
+                    primaryButton: .default(Text(retryLabel)) {
+                        activeError = nil
+                        handleRetry(for: err)
+                    },
+                    secondaryButton: .cancel()
+                )
+            } else {
+                return Alert(
+                    title: Text("Scan Error"),
+                    message: Text(err.message),
+                    dismissButton: .default(Text("OK")) {
+                        activeError = nil
+                    }
+                )
             }
         }
         .onAppear {
@@ -359,6 +329,24 @@ struct VideoRecorderView: View {
             if isLimited != showSpeedWarning {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     showSpeedWarning = isLimited
+                }
+            }
+
+            // Show "no walls" warning if ARKit hasn't committed any vertical
+            // plane anchors after 15s of active scanning. Helps the user
+            // catch a failing scan before tapping Done.
+            if isScanning, let scanStart = scanStartTime {
+                let elapsed = Date().timeIntervalSince(scanStart)
+                let walls = recorder.scanSession?.geometry.walls.count ?? 0
+                let shouldShow = elapsed > 15 && walls == 0
+                if shouldShow != showNoWallsWarning {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        showNoWallsWarning = shouldShow
+                    }
+                }
+            } else if showNoWallsWarning {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    showNoWallsWarning = false
                 }
             }
         }
@@ -402,24 +390,83 @@ struct VideoRecorderView: View {
         coverage.captureMode = .video
         if recorder.capturedCount == 0 {
             coverage.reset()
+            recorder.start()
+        } else {
+            // User tapped "More" to add more frames to an existing scan —
+            // preserve what's already been captured.
+            recorder.resume()
         }
-        recorder.start()
         isScanning = true
+        scanStartTime = Date()
     }
 
     private func stopScan() {
         isScanning = false
+        scanStartTime = nil
+    }
+
+    /// Reverse-lookup a ScanError from its user-facing message.
+    /// Used when processor.state = .failed(msg) needs an alert that matches
+    /// the retryable-vs-not treatment. Fallback: backendServerError.
+    static func errorForMessage(_ msg: String) -> ScanError {
+        let table: [ScanError] = [
+            .unsupportedDevice,
+            .depthModelLoadFailed(detail: ""),
+            .arKitTrackingLimited,
+            .arKitSessionFailed(detail: ""),
+            .noWallsDetected,
+            .insufficientCoverage(binsFilled: 0, binsRequired: 12),
+            .payloadBuildFailed(detail: ""),
+            .uploadNoServer,
+            .uploadTimeout,
+            .backendServerError(status: 0, detail: ""),
+            .noFurnitureDetected,
+        ]
+        return table.first(where: { $0.message == msg })
+            ?? .backendServerError(status: 0, detail: msg)
+    }
+
+    private func handleRetry(for error: ScanError) {
+        switch error {
+        case .noWallsDetected, .insufficientCoverage:
+            // Resume scan — keep previously captured frames, just continue.
+            isScanning = true
+            recorder.resume()
+            scanStartTime = Date()
+        case .uploadNoServer, .uploadTimeout, .payloadBuildFailed, .backendServerError:
+            upload()
+        default:
+            break  // non-retryable cases dismiss with OK
+        }
     }
 
     private func upload() {
         guard recorder.capturedCount > 0 else { return }
-        let result = recorder.stopVideoMode()
-        guard !result.jpegPaths.isEmpty else {
-            processor.state = .failed("No keyframe files found on disk.")
+        // Preserve disk-based keyframe paths (used inside finalizePhoneFirstPayload).
+        _ = recorder.stopVideoMode()
+        Task {
+            do {
+                let payload = try await recorder.finalizePhoneFirstPayload()
+                lastUploadedPayload = payload
+                print("[VideoRecorderView] Uploading phone-first payload scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
+                processor.processPhoneFirstPayload(payload)
+            } catch let e as ScanError {
+                activeError = e
+                processor.state = .failed(e.message)
+            } catch {
+                processor.state = .failed("Scan finalization failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func useLastCapture() {
+        guard let payload = ScanUploadPayload.loadLastCapture() else {
+            processor.state = .failed("Couldn't load the previous capture.")
             return
         }
-        print("[VideoRecorderView] Uploading \(result.jpegPaths.count) keyframes")
-        processor.processKeyframesFromDisk(result.jpegPaths, metadataJSON: result.metadataJSON)
+        lastUploadedPayload = payload
+        print("[VideoRecorderView] Re-uploading last capture scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
+        processor.processPhoneFirstPayload(payload)
     }
 }
 
