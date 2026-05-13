@@ -25,30 +25,50 @@ from .raycast_lift import LiftedDetection
 logger = logging.getLogger("decroom-backend.keyframe_clustering")
 
 # Per-category 3D NN-merge distance for cross-keyframe clustering.
+# Plan 3d retune: real scans upload ~66 keyframes (vs spec's projected 10),
+# so per-object detection density is ~6× higher than originally tuned.
+# Raycast through the bbox center hits different surfaces of the same
+# physical object across keyframes (top, side, front), producing positions
+# 0.5–1.5m apart for tall furniture. Thresholds bumped accordingly.
 BACKEND_TRACKER_DISTANCES: Dict[str, float] = {
-    "bed":          0.6,
-    "sofa":         0.6,
-    "couch":        0.6,
-    "chair":        0.4,
-    "stool":        0.4,
-    "dining_table": 0.5,
-    "desk":         0.5,
-    "monitor":      0.5,
-    "tv":           0.5,
-    "laptop":       0.3,
-    "lamp":         0.3,
-    "lamp_floor":   0.3,
-    "lamp_desk":    0.3,
-    "potted plant": 0.3,
-    "potted_plant": 0.3,
-    "plant":        0.3,
-    "bookshelf":    0.5,
-    "dresser":      0.5,
-    "wardrobe":     0.6,
-    "nightstand":   0.4,
-    "rug":          0.5,
+    "bed":          1.5,
+    "sofa":         1.5,
+    "couch":        1.5,
+    "chair":        0.8,
+    "stool":        0.8,
+    "dining_table": 1.1,
+    "desk":         1.1,
+    "monitor":      0.8,
+    "tv":           0.8,
+    "laptop":       0.5,
+    "lamp":         0.6,
+    "lamp_floor":   0.6,
+    "lamp_desk":    0.6,
+    "potted plant": 0.6,
+    "potted_plant": 0.6,
+    "plant":        0.6,
+    "bookshelf":    1.2,
+    "dresser":      1.2,
+    "wardrobe":     1.5,
+    "nightstand":   0.8,
+    "rug":          0.8,
 }
-DEFAULT_MERGE_DISTANCE = 0.5
+DEFAULT_MERGE_DISTANCE = 0.8
+
+# Plan 3d: detector emits both "tv" and "monitor" labels for the same
+# physical screen. Canonicalize before clustering so they merge.
+_CATEGORY_ALIASES: Dict[str, str] = {
+    "tv": "monitor",
+    "couch": "sofa",
+    "potted_plant": "potted plant",
+    "lamp_floor": "lamp",
+    "lamp_desk": "lamp",
+    "plant": "potted plant",
+}
+
+
+def _canonicalize(category: str) -> str:
+    return _CATEGORY_ALIASES.get(category, category)
 
 # Categories that the open-vocab detector visually confuses with each
 # other on the same physical object. Keys are the family names; values
@@ -105,10 +125,11 @@ def cluster_keyframe_detections(
 
     clusters: List[Dict] = []
     for det in valid:
-        threshold = thresholds.get(det.category, DEFAULT_MERGE_DISTANCE)
+        cat = _canonicalize(det.category)  # Plan 3d: tv→monitor etc.
+        threshold = thresholds.get(cat, DEFAULT_MERGE_DISTANCE)
         merged = False
         for c in clusters:
-            if _category_match(det.category, c["category"]) is None:
+            if _category_match(cat, c["category"]) is None:
                 continue
             if _distance(c["position"], det.position_3d) <= threshold:
                 c["view_count"] += 1
@@ -116,13 +137,13 @@ def cluster_keyframe_detections(
                     c["peak_confidence"] = det.confidence
                     c["best_frame_index"] = det.frame_index
                     c["position"] = list(det.position_3d)
-                    c["category"] = det.category  # higher-confidence label wins
+                    c["category"] = cat  # higher-confidence label wins
                 merged = True
                 break
         if not merged:
             clusters.append({
                 "id": f"rgb_{uuid.uuid4().hex[:6]}",
-                "category": det.category,
+                "category": cat,
                 "position": list(det.position_3d),
                 "peak_confidence": det.confidence,
                 "view_count": 1,

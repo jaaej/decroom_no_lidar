@@ -139,12 +139,16 @@ struct UploadService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 60  // was 1800 for old SfM path; 60s is plenty for SpatialLM
+        // Plan 3c: backend runs SpatialLM (~7s) + Grounding DINO on all
+        // ~66 keyframes (~33s on RTX 4090) + raycast/clustering/consensus.
+        // Real scans land around 40-50s; 180s gives ample headroom for
+        // network variability + cold-start cases. Was 60s pre-Plan-3c.
+        request.timeoutInterval = 180
         request.httpBody = body
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 60
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 180
         let session = URLSession(configuration: config)
         defer { session.finishTasksAndInvalidate() }
 

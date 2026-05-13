@@ -643,11 +643,25 @@ def _merge_phone_and_backend_detections(
     Both inputs share the yolo_objects.json shape:
       {category, position[x,y,z], peak_confidence, view_count, best_frame_index}
 
+    Plan 3d: canonicalize categories (tv→monitor, couch→sofa, plant variants,
+    lamp variants) at the merge boundary so YOLO 'tv' and RGB 'monitor'
+    can collide in consensus_merge / collapse_duplicates instead of
+    surviving as separate entries.
+
     No deduplication here — collapse_duplicates inside _build_final_objects
     handles cross-source duplicates.
     """
-    merged = list(phone_yolo or [])
-    merged.extend(backend_rgb or [])
+    from .keyframe_clustering import _canonicalize
+
+    merged: List[Dict[str, Any]] = []
+    for o in (phone_yolo or []):
+        o = dict(o)
+        o["category"] = _canonicalize(o.get("category", ""))
+        merged.append(o)
+    for o in (backend_rgb or []):
+        o = dict(o)
+        o["category"] = _canonicalize(o.get("category", ""))
+        merged.append(o)
     return merged
 
 
@@ -691,6 +705,11 @@ def _build_final_objects(
     merged, agreement = consensus_merge(yolo_objects_3d, slm_dicts, phone_walls)
     merged = collapse_duplicates(merged)
     merged = snap_to_walls(merged, phone_walls)
+    # Plan 3d: after wall-snapping, same-wall same-category duplicates that
+    # raycast/detection split apart (e.g., 5 "wardrobe"s on the left wall)
+    # collapse cleanly because they now share the same wall coordinates.
+    # Re-run collapse with the same per-category thresholds.
+    merged = collapse_duplicates(merged)
 
     # Best-effort YOLO view-count match for confidence.
     def _yolo_match(mobj: Dict[str, Any]) -> Tuple[bool, int]:

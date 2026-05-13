@@ -95,3 +95,42 @@ def test_default_threshold_for_unknown_category():
     ]
     clusters = cluster_keyframe_detections(dets)
     assert len(clusters) == 1
+
+
+def test_tv_and_monitor_canonicalize_and_merge():
+    """Plan 3d: detector emits both 'tv' and 'monitor' for the same screen.
+    Canonicalize tv → monitor before clustering so they collapse."""
+    dets = [
+        _det(0, "tv",      (2.0, 0.0, 1.5), conf=0.7),
+        _det(1, "monitor", (2.05, 0.0, 1.45), conf=0.8),
+        _det(2, "tv",      (1.95, 0.0, 1.55), conf=0.5),
+    ]
+    clusters = cluster_keyframe_detections(dets)
+    assert len(clusters) == 1
+    assert clusters[0]["category"] == "monitor"
+    assert clusters[0]["view_count"] == 3
+
+
+def test_wardrobes_within_1_5m_merge():
+    """Plan 3d: bumped wardrobe threshold from 0.6 to 1.5m to account for
+    raycast hitting different surfaces of the same physical wardrobe
+    across 66 keyframes."""
+    dets = [
+        _det(0, "wardrobe", (-0.61, -0.07, 0.75), conf=0.5),
+        _det(1, "wardrobe", (0.12, -0.42, -0.47), conf=0.6),  # ~1.4m away
+        _det(2, "wardrobe", (-0.57, 0.73, -1.52), conf=0.7),  # ~2.4m away — stays separate
+    ]
+    clusters = cluster_keyframe_detections(dets)
+    # The first two are within 1.5m and merge; the third is beyond.
+    cats = [c["category"] for c in clusters]
+    assert cats == ["wardrobe", "wardrobe"]
+
+
+def test_lamp_floor_canonicalizes_to_lamp():
+    dets = [
+        _det(0, "lamp_floor", (2.0, 0.0, 1.5)),
+        _det(1, "lamp",       (2.05, 0.0, 1.55)),
+    ]
+    clusters = cluster_keyframe_detections(dets)
+    assert len(clusters) == 1
+    assert clusters[0]["category"] == "lamp"
