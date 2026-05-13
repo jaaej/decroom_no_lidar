@@ -65,3 +65,32 @@ struct ObjectMetadata: Codable {
     let length: Double
     let height: Double
 }
+
+// MARK: - Plan 4a helpers
+
+extension RoomObject {
+    /// Returns a copy of this RoomObject with optionally-changed position
+    /// or rotation_y. All other fields preserved.
+    func with(
+        position: ObjectPosition? = nil,
+        rotationY: Double? = nil
+    ) -> RoomObject {
+        RoomObject(
+            id: id,
+            type: type,
+            asset_id: asset_id,
+            position: position ?? self.position,
+            rotation_y: rotationY ?? self.rotation_y,
+            scale: scale,
+            confidence: confidence,
+            metadata: metadata
+        )
+    }
+}
+
+extension RoomPayload {
+    /// Returns a copy of this RoomPayload with a new objects list.
+    func with(objects: [RoomObject]) -> RoomPayload {
+        RoomPayload(room: room, objects: objects)
+    }
+}
