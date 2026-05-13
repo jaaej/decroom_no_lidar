@@ -86,6 +86,10 @@ final class RoomEditModel: ObservableObject {
     }
 
     func undo() {
-        // Task 5
+        guard let prev = previousObjects else { return }
+        roomPayload = roomPayload.with(objects: prev)
+        previousObjects = nil
+        canUndo = false
+        selectedObjectID = nil
     }
 }

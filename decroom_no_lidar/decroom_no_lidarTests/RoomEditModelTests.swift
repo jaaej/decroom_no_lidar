@@ -162,4 +162,36 @@ final class RoomEditModelTests: XCTestCase {
         model.undo()
         XCTAssertEqual(model.roomPayload.objects[0].rotation_y, 0, accuracy: 1e-5)
     }
+
+    // MARK: - undo()
+
+    func test_undo_restoresPreviousObjects() {
+        let original = [makeObject(id: "a"), makeObject(id: "b", x: 1)]
+        let model = RoomEditModel(initial: makePayload(original))
+        model.delete("a")
+        model.undo()
+        XCTAssertEqual(model.roomPayload.objects.map { $0.id }, ["a", "b"])
+    }
+
+    func test_undo_clearsCanUndo() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a"), makeObject(id: "b", x: 1)]))
+        model.delete("a")
+        model.undo()
+        XCTAssertFalse(model.canUndo)
+    }
+
+    func test_undo_clearsSelection() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a"), makeObject(id: "b", x: 1)]))
+        model.select("b")
+        model.delete("a")
+        model.undo()
+        XCTAssertNil(model.selectedObjectID)
+    }
+
+    func test_undo_noOpWhenNothingToUndo() {
+        let model = RoomEditModel(initial: makePayload([makeObject(id: "a")]))
+        model.undo()  // should not crash
+        XCTAssertEqual(model.roomPayload.objects.count, 1)
+        XCTAssertFalse(model.canUndo)
+    }
 }
