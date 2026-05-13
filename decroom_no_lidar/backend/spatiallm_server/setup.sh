@@ -77,6 +77,10 @@ pip install --quiet --upgrade pip
 echo ">>> Downloading model weights to $HF (this may take a few minutes)..."
 python3 -c "from huggingface_hub import snapshot_download; snapshot_download('manycore-research/SpatialLM1.1-Qwen-0.5B'); print('Model cached.')"
 
+# Plan 3c: pre-cache Grounding DINO so server.py startup doesn't block on download.
+echo ">>> Downloading Grounding DINO weights..."
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny'); print('Grounding DINO cached.')"
+
 # 9. Copy server.py + code_template.txt into place
 echo ">>> Setting up server..."
 if [ -f /workspace/server.py ]; then

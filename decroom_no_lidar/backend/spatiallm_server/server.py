@@ -40,6 +40,32 @@ CODE_TEMPLATE_PATH = SERVER_DIR / "code_template.txt"
 
 DETECT_PROMPT = "Detect walls, doors, windows, boxes."
 
+# ── Grounding DINO globals (Plan 3c) ──
+_gdino_model = None
+_gdino_processor = None
+GDINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
+DEFAULT_GDINO_PROMPT = (
+    "bed. wardrobe. bookshelf. desk. monitor. chair. "
+    "nightstand. dresser. lamp. potted plant. sofa."
+)
+
+
+def load_gdino():
+    """Load Grounding DINO model + processor (called once at startup)."""
+    global _gdino_model, _gdino_processor
+    if _gdino_model is not None:
+        return
+    logger.info("Loading Grounding DINO: %s", GDINO_MODEL_ID)
+    t0 = time.time()
+    from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
+    _gdino_processor = AutoProcessor.from_pretrained(GDINO_MODEL_ID)
+    device = _device or ("cuda" if torch.cuda.is_available() else "cpu")
+    _gdino_model = AutoModelForZeroShotObjectDetection.from_pretrained(
+        GDINO_MODEL_ID
+    ).to(device)
+    _gdino_model.eval()
+    logger.info("Grounding DINO loaded in %.1fs", time.time() - t0)
+
 
 def load_model():
     """Load SpatialLM model + code template (called once at startup)."""
@@ -190,7 +216,8 @@ def run_inference(ply_path: str) -> str:
 
 @app.on_event("startup")
 async def startup():
-    load_model()
+    load_model()    # SpatialLM
+    load_gdino()    # Grounding DINO (Plan 3c)
 
 
 @app.post("/infer")
@@ -225,7 +252,72 @@ async def health():
         "device": str(_device),
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "num_bins": _num_bins,
+        "gdino_loaded": _gdino_model is not None,
     }
+
+
+# ── Plan 3c: open-vocab RGB detection ──
+
+from typing import List
+from fastapi import Form
+
+
+@app.post("/detect_furniture")
+async def detect_furniture(
+    images: List[UploadFile] = File(...),
+    prompt: str = Form(DEFAULT_GDINO_PROMPT),
+    box_threshold: float = Form(0.4),
+    text_threshold: float = Form(0.3),
+):
+    """Run open-vocab detection on a list of JPEGs.
+
+    Returns: {"frames": [{"frame_index": int,
+                            "detections": [{"category": str,
+                                            "bbox_normalized": [x, y, w, h],
+                                            "confidence": float}, ...]}, ...]}
+    bbox is (x, y, w, h) in normalized [0,1] image coords.
+    """
+    from PIL import Image
+    import io
+
+    if _gdino_model is None or _gdino_processor is None:
+        return JSONResponse(status_code=503, content={"error": "gdino not loaded"})
+
+    t0 = time.time()
+    frames_out = []
+    for idx, upload in enumerate(images):
+        raw = await upload.read()
+        image = Image.open(io.BytesIO(raw)).convert("RGB")
+        W, H = image.size
+        inputs = _gdino_processor(
+            images=image, text=prompt, return_tensors="pt"
+        ).to(_gdino_model.device)
+        with torch.no_grad():
+            outputs = _gdino_model(**inputs)
+        results = _gdino_processor.post_process_grounded_object_detection(
+            outputs,
+            inputs.input_ids,
+            box_threshold=box_threshold,
+            text_threshold=text_threshold,
+            target_sizes=[(H, W)],
+        )[0]
+        dets = []
+        for label, score, box in zip(
+            results["labels"], results["scores"], results["boxes"]
+        ):
+            x0, y0, x1, y1 = [float(v) for v in box.tolist()]
+            dets.append({
+                "category": str(label).lower().strip(),
+                "bbox_normalized": [x0 / W, y0 / H,
+                                     (x1 - x0) / W, (y1 - y0) / H],
+                "confidence": float(score),
+            })
+        frames_out.append({"frame_index": idx, "detections": dets})
+
+    elapsed = time.time() - t0
+    logger.info("Detected on %d frames in %.1fs", len(images), elapsed)
+    return JSONResponse(content={"frames": frames_out,
+                                  "elapsed_s": round(elapsed, 2)})
 
 
 if __name__ == "__main__":
