@@ -155,6 +155,8 @@ struct RoomSceneRepresentable: UIViewRepresentable {
         if let scene = uiView.scene {
             SceneSelection.setSelected(editModel?.selectedObjectID, in: scene.rootNode)
         }
+
+        context.coordinator.setActiveAction(editModel?.activeAction)
     }
 }
 

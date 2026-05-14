@@ -33,14 +33,63 @@ final class RoomEditingCoordinator: NSObject {
     }
 
     @objc func handlePan(_ gr: UIPanGestureRecognizer) {
-        // Task 12
+        guard let scnView = scnView, let model = editModel else { return }
+        guard model.activeAction == .move, let id = model.selectedObjectID else { return }
+        let point = gr.location(in: scnView)
+        guard let floor = SceneSelection.floorPoint(forScreen: point, in: scnView) else { return }
+
+        let category = model.roomPayload.objects.first(where: { $0.id == id })?.type ?? ""
+        let snapped = SceneSelection.wallSnap(
+            position: floor, category: category,
+            walls: model.roomPayload.room.walls
+        )
+        let clamped = SceneSelection.clampToFootprint(
+            snapped, walls: model.roomPayload.room.walls
+        )
+
+        let began = (gr.state == .began)
+        model.move(id, to: clamped, gestureBegan: began)
     }
 
     @objc func handleRotate(_ gr: UIRotationGestureRecognizer) {
-        // Task 12
+        guard let model = editModel else { return }
+        guard model.activeAction == .rotate, let id = model.selectedObjectID else { return }
+
+        let snapped = round(gr.rotation / (.pi / 2)) * (.pi / 2)
+        let current = model.roomPayload.objects.first(where: { $0.id == id })?.rotation_y ?? 0
+        let newRotation = current - Double(snapped)   // negate: SceneKit CW vs backend CCW
+
+        let began = (gr.state == .began)
+        model.rotate(id, toRadians: Float(newRotation), gestureBegan: began)
+
+        if gr.state == .ended || gr.state == .cancelled {
+            gr.rotation = 0
+        }
     }
 
     func setActiveAction(_ action: EditAction?) {
-        // Task 12
+        guard let scnView = scnView else { return }
+
+        scnView.allowsCameraControl = (action == nil)
+
+        if let pr = panRecognizer {
+            scnView.removeGestureRecognizer(pr); panRecognizer = nil
+        }
+        if let rr = rotateRecognizer {
+            scnView.removeGestureRecognizer(rr); rotateRecognizer = nil
+        }
+
+        switch action {
+        case .move:
+            let pr = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            scnView.addGestureRecognizer(pr)
+            panRecognizer = pr
+        case .rotate:
+            let rr = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
+            scnView.addGestureRecognizer(rr)
+            rotateRecognizer = rr
+        case .none:
+            break
+        }
     }
 }
