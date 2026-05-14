@@ -128,10 +128,29 @@ enum SceneSelection {
         return nil
     }
 
-    // MARK: - Floor raycast (Task 8)
+    // MARK: - Floor raycast
 
+    /// Project a screen point onto the y=0 floor plane in world space.
+    /// Returns nil if the ray is parallel to the floor or points away.
     static func floorPoint(forScreen point: CGPoint, in scnView: SCNView) -> SIMD2<Float>? {
-        return nil  // Task 8
+        let near = scnView.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 0))
+        let far  = scnView.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 1))
+        return floorPointFromRay(
+            near: SIMD3<Float>(near.x, near.y, near.z),
+            far:  SIMD3<Float>(far.x,  far.y,  far.z)
+        )
+    }
+
+    /// Pure-math ray/plane intersection — unit-testable.
+    static func floorPointFromRay(
+        near: SIMD3<Float>, far: SIMD3<Float>
+    ) -> SIMD2<Float>? {
+        let dir = far - near
+        guard abs(dir.y) > 1e-4 else { return nil }
+        let t = -near.y / dir.y
+        guard t > 0 else { return nil }
+        let world = near + dir * t
+        return SIMD2<Float>(world.x, world.z)
     }
 
     // MARK: - Selection highlight (Task 11)

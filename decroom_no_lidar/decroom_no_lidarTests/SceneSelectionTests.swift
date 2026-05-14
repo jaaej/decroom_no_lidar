@@ -59,4 +59,22 @@ final class SceneSelectionTests: XCTestCase {
         XCTAssertEqual(snapped.x, 0, accuracy: 0.01)
         XCTAssertEqual(snapped.y, -2, accuracy: 0.01)
     }
+
+    // MARK: - floorPoint math (pure)
+
+    func test_floorPointFromRay_centerRayHitsFloor() {
+        let p = SceneSelection.floorPointFromRay(
+            near: SIMD3<Float>(0, 5, 0), far: SIMD3<Float>(0, 4, 0)
+        )
+        XCTAssertNotNil(p)
+        XCTAssertEqual(p!.x, 0, accuracy: 1e-4)
+        XCTAssertEqual(p!.y, 0, accuracy: 1e-4)
+    }
+
+    func test_floorPointFromRay_parallelRay_returnsNil() {
+        let p = SceneSelection.floorPointFromRay(
+            near: SIMD3<Float>(0, 2, 0), far: SIMD3<Float>(1, 2, 0)
+        )
+        XCTAssertNil(p)
+    }
 }
