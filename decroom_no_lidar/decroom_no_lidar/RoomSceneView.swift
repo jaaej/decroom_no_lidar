@@ -74,6 +74,11 @@ struct RoomSceneView: View {
 struct RoomSceneRepresentable: UIViewRepresentable {
     let payload: RoomPayload
     let lightsEnabled: Bool
+    var editModel: RoomEditModel? = nil   // Plan 4a — optional injection
+
+    func makeCoordinator() -> RoomEditingCoordinator {
+        RoomEditingCoordinator()
+    }
 
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
@@ -95,6 +100,10 @@ struct RoomSceneRepresentable: UIViewRepresentable {
             await MainActor.run {
                 scnView.scene = scene
             }
+        }
+
+        if let editModel = editModel {
+            context.coordinator.attach(to: scnView, editModel: editModel)
         }
 
         return scnView
