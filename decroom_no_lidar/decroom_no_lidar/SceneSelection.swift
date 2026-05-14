@@ -90,7 +90,42 @@ enum SceneSelection {
     // MARK: - Hit test (Task 7)
 
     static func hitTest(_ scnView: SCNView, at point: CGPoint) -> String? {
-        return nil  // Task 7
+        let options: [SCNHitTestOption: Any] = [
+            SCNHitTestOption.searchMode: SCNHitTestSearchMode.closest.rawValue,
+            SCNHitTestOption.ignoreHiddenNodes: true,
+        ]
+        // Center hit first.
+        if let hit = scnView.hitTest(point, options: options).first,
+           let id = roomObjectID(forNode: hit.node) {
+            return id
+        }
+        // Retry within a 22pt radius (8 surrounding points).
+        let offsets: [(Int, Int)] = [
+            (11, 0), (-11, 0), (0, 11), (0, -11),
+            (8, 8), (-8, 8), (8, -8), (-8, -8),
+        ]
+        for (dx, dy) in offsets {
+            let p = CGPoint(x: point.x + CGFloat(dx), y: point.y + CGFloat(dy))
+            if let hit = scnView.hitTest(p, options: options).first,
+               let id = roomObjectID(forNode: hit.node) {
+                return id
+            }
+        }
+        return nil
+    }
+
+    /// Walk up the node tree until we find a node whose name starts with
+    /// "obj_" (the convention used by RoomSceneBuilder).
+    /// Returns the bare RoomObject.id (the "obj_" prefix is stripped).
+    private static func roomObjectID(forNode node: SCNNode) -> String? {
+        var current: SCNNode? = node
+        while let n = current {
+            if let name = n.name, name.hasPrefix("obj_") {
+                return String(name.dropFirst(4))
+            }
+            current = n.parent
+        }
+        return nil
     }
 
     // MARK: - Floor raycast (Task 8)

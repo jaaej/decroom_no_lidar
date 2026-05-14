@@ -416,7 +416,7 @@ enum RoomSceneBuilder {
 
     private static func makeObjectNode(obj: RoomObject) -> SCNNode {
         let containerNode = SCNNode()
-        containerNode.name = obj.id
+        containerNode.name = "obj_\(obj.id)"
 
         containerNode.position = SCNVector3(
             Float(obj.position.x),
