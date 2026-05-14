@@ -46,14 +46,33 @@ private final class USDZCache {
 struct RoomSceneView: View {
     let payload: RoomPayload
     @State private var lightsEnabled: Bool = true
+    @ObservedObject private var editModel: RoomEditModel
+    private let editingEnabled: Bool
+
+    /// Read-only initializer (existing call sites). Editing disabled.
+    init(payload: RoomPayload) {
+        self.payload = payload
+        self.editModel = RoomEditModel(initial: payload)
+        self.editingEnabled = false
+    }
+
+    /// Editing initializer (Plan 4a call sites).
+    init(payload: RoomPayload, editModel: RoomEditModel) {
+        self.payload = payload
+        self.editModel = editModel
+        self.editingEnabled = true
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                RoomSceneRepresentable(payload: payload, lightsEnabled: lightsEnabled)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                RoomSceneRepresentable(
+                    payload: editingEnabled ? editModel.roomPayload : payload,
+                    lightsEnabled: lightsEnabled,
+                    editModel: editingEnabled ? editModel : nil
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                // Lighting toggle button
                 Button {
                     lightsEnabled.toggle()
                 } label: {
@@ -64,6 +83,11 @@ struct RoomSceneView: View {
                         .background(.ultraThinMaterial, in: Circle())
                 }
                 .padding(10)
+
+                if editingEnabled {
+                    RoomEditMenuView(editModel: editModel)
+                        .allowsHitTesting(true)
+                }
             }
         }
     }
@@ -110,9 +134,24 @@ struct RoomSceneRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SCNView, context: Context) {
-        // Only update lighting — do NOT rebuild the entire scene
         guard let scene = uiView.scene else { return }
 
+        // Lighting (existing).
+        updateLighting(in: scene)
+
+        // Plan 4a Task 13: rebuild furniture if the object list changed.
+        if editModel != nil {
+            rebuildFurnitureIfNeeded(in: scene, against: payload)
+        }
+
+        // Plan 4a Task 11: apply / clear selection highlight.
+        SceneSelection.setSelected(editModel?.selectedObjectID, in: scene.rootNode)
+
+        // Plan 4a Task 12: install / remove pan-or-rotate gestures.
+        context.coordinator.setActiveAction(editModel?.activeAction)
+    }
+
+    private func updateLighting(in scene: SCNScene) {
         // Remove existing lights and re-add with new setting
         let lightsToRemove = scene.rootNode.childNodes.filter { $0.light != nil }
         for node in lightsToRemove {
@@ -150,13 +189,22 @@ struct RoomSceneRepresentable: UIViewRepresentable {
             ambientNode.name = "_light_ambient"
             scene.rootNode.addChildNode(ambientNode)
         }
+    }
 
-        // Plan 4a: apply / clear selection highlight.
-        if let scene = uiView.scene {
-            SceneSelection.setSelected(editModel?.selectedObjectID, in: scene.rootNode)
+    private func rebuildFurnitureIfNeeded(in scene: SCNScene, against payload: RoomPayload) {
+        // Remove existing furniture nodes (name starts with "obj_").
+        let toRemove = scene.rootNode.childNodes.filter {
+            ($0.name ?? "").hasPrefix("obj_")
         }
+        for n in toRemove { n.removeFromParentNode() }
 
-        context.coordinator.setActiveAction(editModel?.activeAction)
+        // Re-add from the current payload.
+        for obj in payload.objects {
+            if let node = RoomSceneBuilder.makeFurnitureNode(for: obj) {
+                node.name = "obj_\(obj.id)"
+                scene.rootNode.addChildNode(node)
+            }
+        }
     }
 }
 
@@ -227,8 +275,10 @@ enum RoomSceneBuilder {
 
         // Furniture objects
         for obj in objects {
-            let objNode = makeObjectNode(obj: obj)
-            scene.rootNode.addChildNode(objNode)
+            if let node = makeFurnitureNode(for: obj) {
+                node.name = "obj_\(obj.id)"
+                scene.rootNode.addChildNode(node)
+            }
         }
 
         // Camera
@@ -430,9 +480,11 @@ enum RoomSceneBuilder {
 
     // MARK: - Object (Furniture) Construction
 
-    private static func makeObjectNode(obj: RoomObject) -> SCNNode {
+    /// Build a single furniture SCNNode (USDZ-loaded + positioned + rotated +
+    /// scaled). Returns nil if the asset can't be loaded.
+    /// Caller is responsible for setting `node.name = "obj_<id>"`.
+    static func makeFurnitureNode(for obj: RoomObject) -> SCNNode? {
         let containerNode = SCNNode()
-        containerNode.name = "obj_\(obj.id)"
 
         containerNode.position = SCNVector3(
             Float(obj.position.x),
@@ -456,7 +508,7 @@ enum RoomSceneBuilder {
 
         // ── Per-object placement audit log ─────────────────────────────
         let rotDeg = -Float(obj.rotation_y) * 180.0 / .pi
-        print("[Decroom] makeObjectNode: \(obj.type) id=\(obj.id) pos=(\(String(format: "%.3f", obj.position.x)), \(String(format: "%.3f", obj.position.y)), \(String(format: "%.3f", obj.position.z))) rotation_y=\(String(format: "%.4f", obj.rotation_y)) (scene_y=\(String(format: "%.1f", rotDeg))°) asset=\(assetName) usdz=\(usedUSDZ) dims=(\(String(format: "%.3f", obj.metadata.width)), \(String(format: "%.3f", obj.metadata.height)), \(String(format: "%.3f", obj.metadata.length)))")
+        print("[Decroom] makeFurnitureNode: \(obj.type) id=\(obj.id) pos=(\(String(format: "%.3f", obj.position.x)), \(String(format: "%.3f", obj.position.y)), \(String(format: "%.3f", obj.position.z))) rotation_y=\(String(format: "%.4f", obj.rotation_y)) (scene_y=\(String(format: "%.1f", rotDeg))°) asset=\(assetName) usdz=\(usedUSDZ) dims=(\(String(format: "%.3f", obj.metadata.width)), \(String(format: "%.3f", obj.metadata.height)), \(String(format: "%.3f", obj.metadata.length)))")
 
         return containerNode
     }
