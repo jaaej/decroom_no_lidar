@@ -150,6 +150,11 @@ struct RoomSceneRepresentable: UIViewRepresentable {
             ambientNode.name = "_light_ambient"
             scene.rootNode.addChildNode(ambientNode)
         }
+
+        // Plan 4a: apply / clear selection highlight.
+        if let scene = uiView.scene {
+            SceneSelection.setSelected(editModel?.selectedObjectID, in: scene.rootNode)
+        }
     }
 }
 

@@ -153,9 +153,51 @@ enum SceneSelection {
         return SIMD2<Float>(world.x, world.z)
     }
 
-    // MARK: - Selection highlight (Task 11)
+    // MARK: - Selection highlight
 
+    private static let highlightNodeName = "_selection_highlight"
+
+    /// Apply a thin emissive cyan outline to the SCNNode owning the given
+    /// RoomObject.id. Pass nil to clear all highlights. Uses a child node
+    /// scaled slightly larger than the parent so the outline shows through.
     static func setSelected(_ id: String?, in rootNode: SCNNode) {
-        // Task 11
+        // Remove existing highlight wherever it lives.
+        rootNode.enumerateChildNodes { node, _ in
+            if node.name == highlightNodeName {
+                node.removeFromParentNode()
+            }
+        }
+        guard let id = id else { return }
+        guard let target = findNode(named: "obj_\(id)", under: rootNode) else { return }
+
+        let (minVec, maxVec) = target.boundingBox
+        let size = SCNVector3(maxVec.x - minVec.x, maxVec.y - minVec.y, maxVec.z - minVec.z)
+        let outline = SCNNode(geometry: SCNBox(
+            width: CGFloat(size.x), height: CGFloat(size.y),
+            length: CGFloat(size.z), chamferRadius: 0
+        ))
+        outline.name = highlightNodeName
+        outline.position = SCNVector3(
+            (minVec.x + maxVec.x) / 2,
+            (minVec.y + maxVec.y) / 2,
+            (minVec.z + maxVec.z) / 2
+        )
+        outline.scale = SCNVector3(1.02, 1.02, 1.02)
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.clear
+        material.emission.contents = UIColor.cyan
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        material.fillMode = .lines
+        outline.geometry?.firstMaterial = material
+        target.addChildNode(outline)
+    }
+
+    private static func findNode(named name: String, under root: SCNNode) -> SCNNode? {
+        if root.name == name { return root }
+        for child in root.childNodes {
+            if let found = findNode(named: name, under: child) { return found }
+        }
+        return nil
     }
 }
