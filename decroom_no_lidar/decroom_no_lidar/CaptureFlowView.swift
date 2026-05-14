@@ -18,6 +18,7 @@ struct CaptureFlowView: View {
     @State private var roomName: String = ""
     @State private var showNamingSheet = false
     @State private var scanMode: ScanMode
+    @State private var editModel: RoomEditModel?
 
     var goHome: (() -> Void)? = nil
     var initialMode: ScanMode = .video
@@ -82,8 +83,13 @@ struct CaptureFlowView: View {
                 if case .finished(let payload) = processor.state {
                     // Auto-open 3D room preview with save overlay
                     ZStack {
-                        RoomSceneView(payload: payload)
-                            .ignoresSafeArea()
+                        if let em = editModel {
+                            RoomSceneView(payload: payload, editModel: em)
+                                .ignoresSafeArea()
+                        } else {
+                            RoomSceneView(payload: payload)
+                                .ignoresSafeArea()
+                        }
 
                         // Bottom overlay with stats + save button
                         VStack {
@@ -103,6 +109,7 @@ struct CaptureFlowView: View {
 
                                 HStack(spacing: 12) {
                                     Button {
+                                        editModel = nil
                                         processor.reset()
                                     } label: {
                                         Label("Rescan", systemImage: "arrow.counterclockwise")
@@ -126,6 +133,11 @@ struct CaptureFlowView: View {
                             .padding()
                         }
                     }
+                    .onAppear {
+                        if editModel == nil {
+                            editModel = RoomEditModel(initial: payload)
+                        }
+                    }
                     .sheet(isPresented: $showNamingSheet) {
                         NavigationStack {
                             Form {
@@ -139,6 +151,7 @@ struct CaptureFlowView: View {
                                         roomStore.add(payload: payload, name: name)
                                         showNamingSheet = false
                                         roomName = ""
+                                        editModel = nil
                                         processor.reset()
                                         goHome?()
                                     }
@@ -160,6 +173,7 @@ struct CaptureFlowView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if let goHome = goHome {
                         Button(action: {
+                            editModel = nil
                             processor.reset()
                             goHome()
                         }) {
@@ -176,6 +190,7 @@ struct CaptureFlowView: View {
                 if case .finished = processor.state {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Reset") {
+                            editModel = nil
                             processor.reset()
                         }
                     }
