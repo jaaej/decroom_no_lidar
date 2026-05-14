@@ -240,12 +240,18 @@ struct RoomDetailView: View {
     let room: SavedRoom
 
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var editModel: RoomEditModel
+
+    init(room: SavedRoom) {
+        self.room = room
+        _editModel = StateObject(wrappedValue: RoomEditModel(initial: room.payload))
+    }
 
     var body: some View {
         ZStack {
             DR.ink.ignoresSafeArea()
 
-            RoomSceneView(payload: room.payload)
+            RoomSceneView(payload: room.payload, editModel: editModel)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
