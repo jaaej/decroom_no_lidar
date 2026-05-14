@@ -43,4 +43,20 @@ final class SceneSelectionTests: XCTestCase {
         XCTAssertEqual(clamped.x, 0.5, accuracy: 0.001)
         XCTAssertEqual(clamped.y, 0.5, accuracy: 0.001)
     }
+
+    func test_wallSnap_deskCategory_snapsToNearestWall() {
+        let snapped = SceneSelection.wallSnap(
+            position: SIMD2<Float>(0, -1.7), category: "desk", walls: walls()
+        )
+        XCTAssertEqual(snapped.x, 0, accuracy: 0.01)
+        XCTAssertEqual(snapped.y, -2, accuracy: 0.01)
+    }
+
+    func test_wallSnap_tvCategory_snapsToNearestWall() {
+        let snapped = SceneSelection.wallSnap(
+            position: SIMD2<Float>(0, -1.7), category: "tv", walls: walls()
+        )
+        XCTAssertEqual(snapped.x, 0, accuracy: 0.01)
+        XCTAssertEqual(snapped.y, -2, accuracy: 0.01)
+    }
 }

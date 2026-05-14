@@ -17,10 +17,10 @@ import simd
 
 enum SceneSelection {
 
-    // MARK: - Snap rules (mirror Plan 3b consensus.snap_to_walls categories)
+    // MARK: - Snap rules (mirror backend consensus.SNAP_TO_WALL_CATEGORIES)
 
     private static let wallSnapCategories: Set<String> = [
-        "bed", "dresser", "wardrobe", "sofa", "couch", "bookshelf", "nightstand",
+        "bed", "bookshelf", "couch", "desk", "dresser", "nightstand", "sofa", "tv", "wardrobe",
     ]
 
     // MARK: - Wall snap
