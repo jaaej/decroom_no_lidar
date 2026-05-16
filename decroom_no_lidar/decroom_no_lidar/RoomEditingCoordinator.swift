@@ -106,7 +106,34 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
+        // Our furniture drag must NOT run simultaneously with SceneKit's
+        // camera pan — otherwise the camera orbits while the user is
+        // moving an object. The drag is a UIPanGestureRecognizer, and
+        // SceneKit's camera pan is also a UIPanGestureRecognizer, so
+        // gate on type.
+        if gestureRecognizer is FurnitureDragRecognizer
+            && other is UIPanGestureRecognizer {
+            return false
+        }
+        // Tap + rotate can coexist with everything else (so the tap
+        // doesn't have to wait for camera-pan / pinch to fail).
         return true
+    }
+
+    /// Make SceneKit's camera-pan wait for our FurnitureDragRecognizer to
+    /// fail first. When the finger lands on empty space our drag fails
+    /// immediately (per touchesBegan override), and SceneKit's pan takes
+    /// over. When the finger lands on furniture, our drag succeeds and
+    /// SceneKit's pan never fires.
+    nonisolated func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy other: UIGestureRecognizer
+    ) -> Bool {
+        if other is FurnitureDragRecognizer
+            && gestureRecognizer is UIPanGestureRecognizer {
+            return true
+        }
+        return false
     }
 
     // MARK: - Tap

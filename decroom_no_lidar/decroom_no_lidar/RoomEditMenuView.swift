@@ -2,12 +2,13 @@
 //  RoomEditMenuView.swift
 //  decroom_no_lidar
 //
-//  Plan 4a v2 (direct manipulation) — overlay shows:
-//   • Top-trailing Undo button when editModel.canUndo
-//   • Top-leading Delete pill when editModel.selectedObjectID != nil
+//  Plan 4a v3 — bottom edit sheet that shows:
+//   • [Delete] (visible when something is selected)
+//   • [Undo] (visible when canUndo)
 //
-//  Move and Rotate happen via direct gestures (drag furniture, two-finger
-//  twist a selected one); no on-screen mode toggle is needed.
+//  Sits above CaptureFlowView's existing "Save Room / Rescan" bottom area
+//  so it doesn't get hidden. Move + Rotate are direct-manipulation
+//  gestures (drag furniture, two-finger twist) — no buttons needed.
 //
 
 import SwiftUI
@@ -16,21 +17,41 @@ struct RoomEditMenuView: View {
     @ObservedObject var editModel: RoomEditModel
 
     var body: some View {
-        HStack {
+        VStack {
+            Spacer()
+            if shouldShowSheet {
+                actionSheet
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 140)   // clears the Save Room overlay
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: editModel.selectedObjectID)
+        .animation(.easeInOut(duration: 0.15), value: editModel.canUndo)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .allowsHitTesting(true)
+    }
+
+    private var shouldShowSheet: Bool {
+        editModel.selectedObjectID != nil || editModel.canUndo
+    }
+
+    private var actionSheet: some View {
+        HStack(spacing: 16) {
             if editModel.selectedObjectID != nil {
                 deleteButton
             }
-            Spacer()
+            if editModel.selectedObjectID != nil && editModel.canUndo {
+                Spacer()
+            }
             if editModel.canUndo {
                 undoButton
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .animation(.easeInOut(duration: 0.15), value: editModel.selectedObjectID)
-        .animation(.easeInOut(duration: 0.15), value: editModel.canUndo)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .allowsHitTesting(true)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var deleteButton: some View {
@@ -40,9 +61,10 @@ struct RoomEditMenuView: View {
             }
         } label: {
             Label("Delete", systemImage: "trash")
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+                .font(.body.weight(.medium))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(minHeight: 44)
         }
         .accessibilityIdentifier("editAction.Delete")
         .tint(.red)
@@ -53,9 +75,10 @@ struct RoomEditMenuView: View {
             editModel.undo()
         } label: {
             Label("Undo", systemImage: "arrow.uturn.backward")
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+                .font(.body.weight(.medium))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(minHeight: 44)
         }
         .accessibilityIdentifier("editAction.Undo")
     }
