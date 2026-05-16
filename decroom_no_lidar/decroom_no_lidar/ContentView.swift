@@ -818,58 +818,64 @@ final class GuidedARFrameRecorder: ObservableObject {
         let dstWidth = max(1, Int(Float(srcWidth) * scale))
         let dstHeight = targetHeight
 
-        var dstData = [UInt8](repeating: 0, count: dstWidth * dstHeight)
-        var dstBuffer = vImage_Buffer(
-            data: &dstData,
-            height: vImagePixelCount(dstHeight),
-            width: vImagePixelCount(dstWidth),
-            rowBytes: dstWidth
-        )
-
-        let scaleErr = vImageScale_Planar8(&srcBuffer, &dstBuffer, nil, vImage_Flags(kvImageNoFlags))
-        guard scaleErr == kvImageNoError else { return 0 }
-
-        // Convert to Float for convolution
         let pixelCount = dstWidth * dstHeight
+        var dstData = [UInt8](repeating: 0, count: pixelCount)
         var floatData = [Float](repeating: 0, count: pixelCount)
-        vDSP_vfltu8(dstData, 1, &floatData, 1, vDSP_Length(pixelCount))
-
-        // Convolve with Laplacian kernel: [0,1,0; 1,-4,1; 0,1,0]
-        var floatBuffer = vImage_Buffer(
-            data: &floatData,
-            height: vImagePixelCount(dstHeight),
-            width: vImagePixelCount(dstWidth),
-            rowBytes: dstWidth * MemoryLayout<Float>.size
-        )
-
         var resultData = [Float](repeating: 0, count: pixelCount)
-        var resultBuffer = vImage_Buffer(
-            data: &resultData,
-            height: vImagePixelCount(dstHeight),
-            width: vImagePixelCount(dstWidth),
-            rowBytes: dstWidth * MemoryLayout<Float>.size
-        )
 
-        var kernel: [Float] = [0, 1, 0, 1, -4, 1, 0, 1, 0]
-        let convErr = vImageConvolve_PlanarF(
-            &floatBuffer,
-            &resultBuffer,
-            nil,
-            0, 0,
-            &kernel,
-            3, 3,
-            0,
-            vImage_Flags(kvImageEdgeExtend)
-        )
-        guard convErr == kvImageNoError else { return 0 }
+        // Pointer-stable nested closures ensure vImage_Buffer.data outlives the calls
+        // that consume it (the inout-style init produces a warning otherwise).
+        return dstData.withUnsafeMutableBufferPointer { dstPtr -> Float in
+            var dstBuffer = vImage_Buffer(
+                data: dstPtr.baseAddress!,
+                height: vImagePixelCount(dstHeight),
+                width: vImagePixelCount(dstWidth),
+                rowBytes: dstWidth
+            )
 
-        // Compute variance: mean(x²) - mean(x)²
-        var meanSq: Float = 0
-        vDSP_measqv(resultData, 1, &meanSq, vDSP_Length(pixelCount))
-        var mean: Float = 0
-        vDSP_meanv(resultData, 1, &mean, vDSP_Length(pixelCount))
+            let scaleErr = vImageScale_Planar8(&srcBuffer, &dstBuffer, nil, vImage_Flags(kvImageNoFlags))
+            guard scaleErr == kvImageNoError else { return 0 }
 
-        return meanSq - mean * mean
+            return floatData.withUnsafeMutableBufferPointer { floatPtr -> Float in
+                vDSP_vfltu8(dstPtr.baseAddress!, 1, floatPtr.baseAddress!, 1, vDSP_Length(pixelCount))
+
+                var floatBuffer = vImage_Buffer(
+                    data: floatPtr.baseAddress!,
+                    height: vImagePixelCount(dstHeight),
+                    width: vImagePixelCount(dstWidth),
+                    rowBytes: dstWidth * MemoryLayout<Float>.size
+                )
+
+                return resultData.withUnsafeMutableBufferPointer { resultPtr -> Float in
+                    var resultBuffer = vImage_Buffer(
+                        data: resultPtr.baseAddress!,
+                        height: vImagePixelCount(dstHeight),
+                        width: vImagePixelCount(dstWidth),
+                        rowBytes: dstWidth * MemoryLayout<Float>.size
+                    )
+
+                    var kernel: [Float] = [0, 1, 0, 1, -4, 1, 0, 1, 0]
+                    let convErr = vImageConvolve_PlanarF(
+                        &floatBuffer,
+                        &resultBuffer,
+                        nil,
+                        0, 0,
+                        &kernel,
+                        3, 3,
+                        0,
+                        vImage_Flags(kvImageEdgeExtend)
+                    )
+                    guard convErr == kvImageNoError else { return 0 }
+
+                    var meanSq: Float = 0
+                    vDSP_measqv(resultPtr.baseAddress!, 1, &meanSq, vDSP_Length(pixelCount))
+                    var mean: Float = 0
+                    vDSP_meanv(resultPtr.baseAddress!, 1, &mean, vDSP_Length(pixelCount))
+
+                    return meanSq - mean * mean
+                }
+            }
+        }
     }
 
     // MARK: - Exposure/Focus Lock
@@ -965,7 +971,6 @@ final class GuidedARFrameRecorder: ObservableObject {
 
         let featurePointsSIMD = rawFeaturePoints.map { SIMD3<Float>($0.x, $0.y, $0.z) }
         let ciCtx = self.ciContext
-        let isVideoModeCapture = self.isVideoMode
 
         Task.detached(priority: .userInitiated) {
             // Rotate image (ARKit sensor -> portrait)
@@ -1210,7 +1215,7 @@ final class GuidedARFrameRecorder: ObservableObject {
                 alignment: planeAlignmentString(anchor.alignment),
                 transform: anchor.transform.toRowMajorArray(),
                 center: [anchor.center.x, anchor.center.y, anchor.center.z],
-                extent: [anchor.extent.x, anchor.extent.y, anchor.extent.z]
+                extent: [anchor.planeExtent.width, 0, anchor.planeExtent.height]
             )
         }
     }

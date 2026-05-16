@@ -23,7 +23,7 @@ enum DepthRunnerError: Error {
     case unexpectedOutput
 }
 
-final class DepthRunner {
+final class DepthRunner: @unchecked Sendable {
     private let model: MLModel
     private let syncQueue = DispatchQueue(label: "decroom.depth-runner", qos: .userInitiated)
     private var _targetFrameInterval: TimeInterval = 0.2  // 5fps default

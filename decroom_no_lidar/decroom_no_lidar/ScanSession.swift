@@ -13,6 +13,11 @@ import Foundation
 import ARKit
 import SwiftUI
 import CoreImage
+
+// CVPixelBuffer is a CF type and is safe to capture across queues for
+// the read-only access we do (CVPixelBufferLockBaseAddress / unlock).
+// Apple may add the conformance natively in a future SDK.
+extension CVPixelBuffer: @unchecked @retroactive Sendable {}
 import simd
 
 @MainActor
@@ -82,7 +87,7 @@ final class ScanSession: ObservableObject {
         let intrinsics: Intrinsics
         let worldFromCamera: simd_float4x4
     }
-    nonisolated(unsafe) private let snapshotQueue = DispatchQueue(label: "decroom.scan-session.depth-snapshot")
+    private let snapshotQueue = DispatchQueue(label: "decroom.scan-session.depth-snapshot")
     nonisolated(unsafe) private var _latestDepthSnapshot: DepthSnapshot?
 
     nonisolated private func storeDepthSnapshot(_ snap: DepthSnapshot) {
@@ -100,7 +105,7 @@ final class ScanSession: ObservableObject {
         Task.detached(priority: .userInitiated) { [weak self] in
             let depth = try? DepthRunner()
             let yolo = try? YoloRunner()
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.depthRunner = depth
                 self.yoloRunner = yolo

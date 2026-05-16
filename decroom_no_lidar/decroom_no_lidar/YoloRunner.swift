@@ -17,7 +17,7 @@ enum YoloRunnerError: Error {
     case unexpectedOutput
 }
 
-final class YoloRunner {
+final class YoloRunner: @unchecked Sendable {
     private let model: MLModel
     let inputSize = CGSize(width: 640, height: 640)
     let confidenceThreshold: Float

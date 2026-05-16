@@ -122,7 +122,7 @@ final class PointCloudAccumulator {
         // Binary payload
         for (pos, col) in averaged {
             var x = pos.x, y = pos.y, z = pos.z
-            var r = col.x, g = col.y, b = col.z
+            let r = col.x, g = col.y, b = col.z
             withUnsafeBytes(of: &x) { output.append(contentsOf: $0) }
             withUnsafeBytes(of: &y) { output.append(contentsOf: $0) }
             withUnsafeBytes(of: &z) { output.append(contentsOf: $0) }
