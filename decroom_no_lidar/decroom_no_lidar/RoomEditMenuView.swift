@@ -22,7 +22,7 @@ struct RoomEditMenuView: View {
             if shouldShowSheet {
                 actionSheet
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 140)   // clears the Save Room overlay
+                    .padding(.bottom, 180)   // clears the Save Room overlay
             }
         }
         .animation(.easeInOut(duration: 0.15), value: editModel.selectedObjectID)

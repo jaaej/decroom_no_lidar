@@ -73,10 +73,8 @@ struct RoomSceneView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                if editingEnabled {
-                    RoomEditMenuView(editModel: editModel)
-                        .allowsHitTesting(true)
-                }
+                // Edit menu is rendered by the parent (CaptureFlowView) so
+                // it sits on top of the Save Room overlay. Don't mount it here.
 
                 Button {
                     lightsEnabled.toggle()
@@ -206,7 +204,7 @@ struct RoomSceneRepresentable: UIViewRepresentable {
 
         // Re-add from the current payload.
         for obj in payload.objects {
-            if let node = RoomSceneBuilder.makeFurnitureNode(for: obj) {
+            if let node = RoomSceneBuilder.makeFurnitureNode(for: obj, walls: payload.room.walls) {
                 node.name = "obj_\(obj.id)"
                 scene.rootNode.addChildNode(node)
             }
@@ -281,7 +279,7 @@ enum RoomSceneBuilder {
 
         // Furniture objects
         for obj in objects {
-            if let node = makeFurnitureNode(for: obj) {
+            if let node = makeFurnitureNode(for: obj, walls: env.walls) {
                 node.name = "obj_\(obj.id)"
                 scene.rootNode.addChildNode(node)
             }
@@ -489,13 +487,21 @@ enum RoomSceneBuilder {
     /// Build a single furniture SCNNode (USDZ-loaded + positioned + rotated +
     /// scaled). Returns nil if the asset can't be loaded.
     /// Caller is responsible for setting `node.name = "obj_<id>"`.
-    static func makeFurnitureNode(for obj: RoomObject) -> SCNNode? {
+    /// Pass `walls` to clamp the object's XZ position to the room footprint
+    /// (prevents backend-supplied positions from rendering outside the room).
+    static func makeFurnitureNode(for obj: RoomObject, walls: [Wall] = []) -> SCNNode? {
         let containerNode = SCNNode()
 
+        // Clamp XZ to room footprint so generated objects can't render
+        // outside the walls. Y (height) is preserved as-is.
+        let xz = SceneSelection.clampToFootprint(
+            SIMD2<Float>(Float(obj.position.x), Float(obj.position.z)),
+            walls: walls
+        )
         containerNode.position = SCNVector3(
-            Float(obj.position.x),
+            xz.x,
             Float(obj.position.y),
-            Float(obj.position.z)
+            xz.y
         )
 
         // Backend rotation_y: CCW positive. SceneKit eulerAngles.y: CW positive. Negate.

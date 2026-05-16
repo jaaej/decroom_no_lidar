@@ -132,6 +132,13 @@ struct CaptureFlowView: View {
                             .cornerRadius(16)
                             .padding()
                         }
+
+                        // Edit menu (Delete + Undo) lives ABOVE the Save Room
+                        // overlay so its buttons are tappable.
+                        if let em = editModel {
+                            RoomEditMenuView(editModel: em)
+                                .allowsHitTesting(true)
+                        }
                     }
                     .onAppear {
                         if editModel == nil {
