@@ -153,6 +153,14 @@ struct RoomSceneRepresentable: UIViewRepresentable {
         // of the view. No mode toggle needed — the drag recognizer decides
         // per-touch whether to claim the gesture (finger on furniture) or
         // yield to SceneKit's camera pan (finger on empty space).
+
+        // Re-run the SceneKit-tap defeat. SceneKit installs its tap
+        // recognizers lazily on first interaction, so the one-shot defeat
+        // in RoomEditingCoordinator.attach() can miss them. Calling this
+        // every updateUIView keeps them disabled.
+        if editModel != nil {
+            context.coordinator.ensureSceneKitTapsDefeated()
+        }
     }
 
     private func updateLighting(in scene: SCNScene) {

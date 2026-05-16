@@ -100,10 +100,21 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
 
     private func defeatSceneKitDoubleTapZoom(in scnView: SCNView) {
         for gr in scnView.gestureRecognizers ?? [] {
-            if let t = gr as? UITapGestureRecognizer, t.numberOfTapsRequired == 2 {
+            // Disable every tap recognizer that isn't ours (SceneKit
+            // installs a double-tap-zoom; some iOS versions also install
+            // a single-tap "focus" that swallows our selection tap).
+            if let t = gr as? UITapGestureRecognizer, t !== tapRecognizer {
                 t.isEnabled = false
             }
         }
+    }
+
+    /// Called from RoomSceneView.updateUIView every time the model
+    /// publishes — re-runs the defeat in case SceneKit lazily installed
+    /// new recognizers after our initial attach.
+    func ensureSceneKitTapsDefeated() {
+        guard let scnView = scnView else { return }
+        defeatSceneKitDoubleTapZoom(in: scnView)
     }
 
     // MARK: - UIGestureRecognizerDelegate
@@ -154,6 +165,7 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
         guard let scnView = scnView, let model = editModel else { return }
         let point = gr.location(in: scnView)
         let id = SceneSelection.hitTest(scnView, at: point)
+        print("[Decroom] tap at \(point) -> hit \(id ?? "nil")")
         model.select(id)   // id == nil → deselect
     }
 
