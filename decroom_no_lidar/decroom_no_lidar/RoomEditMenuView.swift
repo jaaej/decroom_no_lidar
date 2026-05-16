@@ -36,13 +36,12 @@ struct RoomEditMenuView: View {
     }
 
     private var actionSheet: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             if editModel.selectedObjectID != nil {
                 deleteButton
+                liftButton
             }
-            if editModel.selectedObjectID != nil && editModel.canUndo {
-                Spacer()
-            }
+            Spacer()
             if editModel.canUndo {
                 undoButton
             }
@@ -52,6 +51,26 @@ struct RoomEditMenuView: View {
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var liftButton: some View {
+        Button {
+            editModel.verticalDragMode.toggle()
+        } label: {
+            Label("Lift", systemImage: "arrow.up.and.down")
+                .font(.body.weight(.medium))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(minHeight: 44)
+                .background(
+                    editModel.verticalDragMode
+                        ? AnyShapeStyle(Color.accentColor.opacity(0.25))
+                        : AnyShapeStyle(Color.clear),
+                    in: Capsule()
+                )
+        }
+        .accessibilityIdentifier("editAction.Lift")
+        .tint(editModel.verticalDragMode ? .accentColor : .primary)
     }
 
     private var deleteButton: some View {

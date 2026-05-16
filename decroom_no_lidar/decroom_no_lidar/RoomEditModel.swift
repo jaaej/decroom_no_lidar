@@ -20,6 +20,12 @@ final class RoomEditModel: ObservableObject {
     @Published var activeAction: EditAction?
     @Published private(set) var canUndo: Bool = false
 
+    /// When true, dragging a selected furniture object changes its Y
+    /// (height above floor) instead of its XZ (floor position). Toggled
+    /// by the user via the "Lift" button in the edit menu. Persists
+    /// across drags until the user toggles it off.
+    @Published var verticalDragMode: Bool = false
+
     @Published var selectedObjectID: String? {
         didSet {
             // Validate against current objects; setting an invalid ID clears.
@@ -68,6 +74,21 @@ final class RoomEditModel: ObservableObject {
         }
         let old = roomPayload.objects[idx]
         let newPos = ObjectPosition(x: Double(xz.x), y: old.position.y, z: Double(xz.y))
+        var newObjects = roomPayload.objects
+        newObjects[idx] = old.with(position: newPos)
+        roomPayload = roomPayload.with(objects: newObjects)
+    }
+
+    /// Move the selected object along the Y (vertical) axis only.
+    /// XZ is preserved; only height changes.
+    func moveY(_ id: String, to y: Float, gestureBegan: Bool) {
+        guard let idx = roomPayload.objects.firstIndex(where: { $0.id == id }) else { return }
+        if gestureBegan {
+            previousObjects = roomPayload.objects
+            canUndo = true
+        }
+        let old = roomPayload.objects[idx]
+        let newPos = ObjectPosition(x: old.position.x, y: Double(y), z: old.position.z)
         var newObjects = roomPayload.objects
         newObjects[idx] = old.with(position: newPos)
         roomPayload = roomPayload.with(objects: newObjects)

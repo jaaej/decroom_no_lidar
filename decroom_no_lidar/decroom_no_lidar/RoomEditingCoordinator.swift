@@ -25,6 +25,11 @@ final class FurnitureDragRecognizer: UIPanGestureRecognizer {
     var hitTester: ((CGPoint) -> String?)?
     /// The RoomObject.id this drag is claiming, set on touchesBegan if hit.
     var draggingObjectID: String?
+    /// Snapshot of the object's Y at drag start — used in vertical mode
+    /// so the height change is computed from a stable reference.
+    var beginObjectY: Double = 0
+    /// Snapshot of the finger's Y in view coordinates at drag start.
+    var beginFingerY: CGFloat = 0
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
@@ -32,6 +37,7 @@ final class FurnitureDragRecognizer: UIPanGestureRecognizer {
         let point = touch.location(in: v)
         if let id = hitTester?(point) {
             draggingObjectID = id
+            beginFingerY = point.y
         } else {
             // No furniture under finger — fail so SCNView's pan handles it.
             draggingObjectID = nil
@@ -158,25 +164,40 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
         guard let drag = gr as? FurnitureDragRecognizer,
               let id = drag.draggingObjectID else { return }
 
-        let point = gr.location(in: scnView)
-        guard let floor = SceneSelection.floorPoint(forScreen: point, in: scnView) else { return }
-
         // Mark the dragged object as selected (so the highlight follows the move).
         if model.selectedObjectID != id {
             model.select(id)
         }
 
-        let category = model.roomPayload.objects.first(where: { $0.id == id })?.type ?? ""
-        let snapped = SceneSelection.wallSnap(
-            position: floor, category: category,
-            walls: model.roomPayload.room.walls
-        )
-        let clamped = SceneSelection.clampToFootprint(
-            snapped, walls: model.roomPayload.room.walls
-        )
-
         let began = (gr.state == .began)
-        model.move(id, to: clamped, gestureBegan: began)
+
+        if model.verticalDragMode {
+            // Vertical (Y-axis) drag — finger up = object up, down = down.
+            // 1 screen point ≈ 5 mm of world-space height. Scale is empirical
+            // — feels natural at typical viewing distance.
+            let point = gr.location(in: scnView)
+            if began,
+               let obj = model.roomPayload.objects.first(where: { $0.id == id }) {
+                drag.beginObjectY = obj.position.y
+            }
+            let deltaPixels = drag.beginFingerY - point.y   // up = positive
+            let deltaY = Double(deltaPixels) * 0.005
+            let newY = drag.beginObjectY + deltaY
+            model.moveY(id, to: Float(newY), gestureBegan: began)
+        } else {
+            // Floor (XZ) drag — raycast finger to floor plane, snap, clamp.
+            let point = gr.location(in: scnView)
+            guard let floor = SceneSelection.floorPoint(forScreen: point, in: scnView) else { return }
+            let category = model.roomPayload.objects.first(where: { $0.id == id })?.type ?? ""
+            let snapped = SceneSelection.wallSnap(
+                position: floor, category: category,
+                walls: model.roomPayload.room.walls
+            )
+            let clamped = SceneSelection.clampToFootprint(
+                snapped, walls: model.roomPayload.room.walls
+            )
+            model.move(id, to: clamped, gestureBegan: began)
+        }
     }
 
     // MARK: - Rotate (two-finger twist on a selected object)
