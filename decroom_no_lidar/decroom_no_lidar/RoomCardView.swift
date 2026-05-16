@@ -56,7 +56,6 @@ struct GridRoomCard: View {
                 .padding(.bottom, 11)
             }
         }
-        .buttonStyle(.plain)
         .background(DR.paper, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -154,7 +153,6 @@ struct FeaturedRoomCard: View {
                 .padding(.bottom, 14)
             }
         }
-        .buttonStyle(.plain)
         .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .drPressable()
@@ -271,6 +269,10 @@ struct RoomDetailView: View {
                 Spacer()
                 statsSheet
             }
+
+            // Plan 4a edit menu (Delete / Lift / Undo side bar).
+            RoomEditMenuView(editModel: editModel)
+                .allowsHitTesting(true)
         }
         .toolbar(.hidden, for: .navigationBar)
     }
@@ -300,59 +302,66 @@ struct RoomDetailView: View {
     }
 
     private var statsSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
+        let payload = editModel.roomPayload
+
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
                 DREyebrow(text: "ROOM / DETAIL", color: DR.indigoSoft)
                 Text(room.name)
-                    .font(DR.serif(30))
+                    .font(DR.serif(20))
                     .foregroundStyle(.white)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
 
             Rectangle().fill(.white.opacity(0.10)).frame(height: 1)
 
-            HStack(alignment: .top, spacing: 24) {
+            HStack(alignment: .top, spacing: 12) {
                 statColumn(label: "FOOTPRINT",
-                           value: String(format: "%.1f × %.1f", room.payload.envelope.width, room.payload.envelope.length),
+                           value: String(format: "%.1f × %.1f", payload.envelope.width, payload.envelope.length),
                            unit: "m")
                 statColumn(label: "HEIGHT",
-                           value: String(format: "%.2f", room.payload.envelope.height),
+                           value: String(format: "%.2f", payload.envelope.height),
                            unit: "m")
                 statColumn(label: "OBJECTS",
-                           value: "\(room.payload.objects.count)",
+                           value: "\(payload.objects.count)",
                            unit: "indexed")
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .frame(maxWidth: 300, alignment: .leading)
         .background(
             ZStack {
                 DR.ink.opacity(0.92)
                 Rectangle().fill(.ultraThinMaterial).opacity(0.35)
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.white.opacity(0.10), lineWidth: 1)
         )
-        .padding(.horizontal, 14)
-        .padding(.bottom, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 12)
+        .padding(.trailing, 104)
+        .padding(.bottom, 12)
     }
 
     private func statColumn(label: String, value: String, unit: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(DR.mono(9, weight: .medium))
-                .tracking(2.0)
+                .font(DR.mono(7.5, weight: .medium))
+                .tracking(1.3)
                 .foregroundStyle(.white.opacity(0.55))
 
             HStack(alignment: .lastTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(DR.serif(22))
+                    .font(DR.serif(15))
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(unit)
-                    .font(DR.mono(10, weight: .medium))
+                    .font(DR.mono(7.5, weight: .medium))
                     .foregroundStyle(DR.indigoSoft)
             }
         }
