@@ -24,6 +24,7 @@ python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 - SceneKit `eulerAngles.y` is CW positive — negate backend `rotation_y` (CCW positive)
 - USDZ Kenney models need bounding box measurement + median scale factor + Y-offset to floor
 - Do NOT make changes the user didn't ask for — no extra refactoring, no unsolicited docstrings
+- **NEVER recommend destructive iOS actions without first stating exactly what user data will be lost.** This includes: "Delete App" (wipes the entire app sandbox — `Documents/decroom_saved_rooms.json` and `Documents/last_payload/` are GONE), "Reset Content & Settings" on the device, force-erasing a simulator, or any `xcrun simctl erase`. Decroom has NO cloud backup — once these are deleted, they cannot be recovered. Default to non-destructive alternatives (Clean Build Folder, `xcodebuild clean`, just hitting Run again to reinstall over the top, etc.). If a destructive action genuinely is the right move, first offer to pull a backup via `xcrun devicectl device copy from` and wait for the user to confirm before proceeding.
 
 ## Architecture (Phone-First — decided 2026-04-16)
 - **Design direction**: phone does geometry (ARKit planes + on-device depth), backend adds semantics only
