@@ -69,7 +69,8 @@ struct RoomSceneView: View {
                 RoomSceneRepresentable(
                     payload: editingEnabled ? editModel.roomPayload : payload,
                     lightsEnabled: lightsEnabled,
-                    editModel: editingEnabled ? editModel : nil
+                    editModel: editingEnabled ? editModel : nil,
+                    selectedObjectID: editingEnabled ? editModel.selectedObjectID : nil
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
@@ -100,6 +101,12 @@ struct RoomSceneRepresentable: UIViewRepresentable {
     let payload: RoomPayload
     let lightsEnabled: Bool
     var editModel: RoomEditModel? = nil   // Plan 4a — optional injection
+    /// Explicit forward of editModel.selectedObjectID so SwiftUI's
+    /// representable-diff sees changes when selection toggles. Without
+    /// this, tap-to-select doesn't visibly highlight because the
+    /// representable struct's other props are unchanged and updateUIView
+    /// gets skipped.
+    var selectedObjectID: String? = nil
 
     func makeCoordinator() -> RoomEditingCoordinator {
         RoomEditingCoordinator()
