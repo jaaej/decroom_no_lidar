@@ -200,13 +200,17 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
             // Floor (XZ) drag — raycast finger to floor plane, snap, clamp.
             let point = gr.location(in: scnView)
             guard let floor = SceneSelection.floorPoint(forScreen: point, in: scnView) else { return }
-            let category = model.roomPayload.objects.first(where: { $0.id == id })?.type ?? ""
+            let obj = model.roomPayload.objects.first(where: { $0.id == id })
+            let category = obj?.type ?? ""
+            let metadata = obj?.metadata
             let snapped = SceneSelection.wallSnap(
                 position: floor, category: category,
-                walls: model.roomPayload.room.walls
+                walls: model.roomPayload.room.walls,
+                objectMetadata: metadata
             )
             let clamped = SceneSelection.clampToFootprint(
-                snapped, walls: model.roomPayload.room.walls
+                snapped, walls: model.roomPayload.room.walls,
+                objectMetadata: metadata
             )
             model.move(id, to: clamped, gestureBegan: began)
         }

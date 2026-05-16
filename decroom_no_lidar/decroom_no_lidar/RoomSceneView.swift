@@ -508,10 +508,13 @@ enum RoomSceneBuilder {
         let containerNode = SCNNode()
 
         // Clamp XZ to room footprint so generated objects can't render
-        // outside the walls. Y (height) is preserved as-is.
+        // outside the walls. Inset by the object's half-depth so the
+        // GEOMETRY (not just the center) stays inside the walls.
+        // Y (height) is preserved as-is.
         let xz = SceneSelection.clampToFootprint(
             SIMD2<Float>(Float(obj.position.x), Float(obj.position.z)),
-            walls: walls
+            walls: walls,
+            objectMetadata: obj.metadata
         )
         containerNode.position = SCNVector3(
             xz.x,

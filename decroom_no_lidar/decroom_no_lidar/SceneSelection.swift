@@ -25,30 +25,72 @@ enum SceneSelection {
 
     // MARK: - Wall snap
 
+    /// Project `position` onto the nearest wall segment for wall-snap
+    /// categories, then offset inward by `inwardOffset` so the object's
+    /// geometry doesn't extend past the wall. Pass the object's metadata
+    /// so the offset matches its actual depth (half of the shorter XZ
+    /// dimension). Non-wall-snap categories return position unchanged.
     static func wallSnap(
         position: SIMD2<Float>,
         category: String,
-        walls: [Wall]
+        walls: [Wall],
+        objectMetadata: ObjectMetadata? = nil
     ) -> SIMD2<Float> {
         guard wallSnapCategories.contains(category) else { return position }
         guard !walls.isEmpty else { return position }
+
+        let inset = inwardOffset(for: objectMetadata)
+        let center = roomCenter(walls: walls)
 
         var bestDist: Float = .greatestFiniteMagnitude
         var snapped = position
         for wall in walls {
             guard wall.start.count >= 2, wall.end.count >= 2 else { continue }
-            let projected = projectOntoSegment(
-                p: position,
-                a: SIMD2<Float>(Float(wall.start[0]), Float(wall.start[1])),
-                b: SIMD2<Float>(Float(wall.end[0]),   Float(wall.end[1]))
-            )
+            let a = SIMD2<Float>(Float(wall.start[0]), Float(wall.start[1]))
+            let b = SIMD2<Float>(Float(wall.end[0]),   Float(wall.end[1]))
+            let projected = projectOntoSegment(p: position, a: a, b: b)
             let d = simd_distance(position, projected)
             if d < bestDist {
                 bestDist = d
-                snapped = projected
+                // Compute inward normal of this wall (toward room center).
+                let dir = b - a
+                let len = simd_length(dir)
+                if len > 1e-6 {
+                    let n = simd_normalize(SIMD2<Float>(-dir.y, dir.x))
+                    let toCenter = center - projected
+                    let inward = simd_dot(n, toCenter) >= 0 ? n : -n
+                    snapped = projected + inward * inset
+                } else {
+                    snapped = projected
+                }
             }
         }
         return snapped
+    }
+
+    /// Half of the object's shortest XZ dimension — the side that faces
+    /// the wall when the object is in standard "against the wall" pose.
+    /// Falls back to 15 cm for missing metadata.
+    private static func inwardOffset(for meta: ObjectMetadata?) -> Float {
+        guard let meta = meta else { return 0.15 }
+        let depth = Float(min(meta.width, meta.length))
+        return max(0.05, depth / 2)
+    }
+
+    private static func roomCenter(walls: [Wall]) -> SIMD2<Float> {
+        var xs: [Float] = []
+        var zs: [Float] = []
+        for w in walls {
+            for ep in [w.start, w.end] {
+                guard ep.count >= 2 else { continue }
+                xs.append(Float(ep[0]))
+                zs.append(Float(ep[1]))
+            }
+        }
+        guard !xs.isEmpty else { return .zero }
+        let xMin = xs.min()!, xMax = xs.max()!
+        let zMin = zs.min()!, zMax = zs.max()!
+        return SIMD2<Float>((xMin + xMax) / 2, (zMin + zMax) / 2)
     }
 
     private static func projectOntoSegment(
@@ -64,8 +106,12 @@ enum SceneSelection {
 
     // MARK: - Footprint clamp
 
+    /// Clamp `p` to the rectangular bbox of all wall endpoints, optionally
+    /// inset by the object's half-depth so the rendered geometry stays
+    /// inside the walls even at the bbox boundary.
     static func clampToFootprint(
-        _ p: SIMD2<Float>, walls: [Wall]
+        _ p: SIMD2<Float>, walls: [Wall],
+        objectMetadata: ObjectMetadata? = nil
     ) -> SIMD2<Float> {
         guard !walls.isEmpty else { return p }
         var xMin: Float = .greatestFiniteMagnitude
@@ -81,9 +127,17 @@ enum SceneSelection {
                 zMin = min(zMin, z); zMax = max(zMax, z)
             }
         }
+        let inset = inwardOffset(for: objectMetadata)
+        let xLo = xMin + inset, xHi = xMax - inset
+        let zLo = zMin + inset, zHi = zMax - inset
+        // Guard against tiny rooms where inset would invert the bounds.
+        let finalXLo = xLo <= xHi ? xLo : (xMin + xMax) / 2
+        let finalXHi = xLo <= xHi ? xHi : (xMin + xMax) / 2
+        let finalZLo = zLo <= zHi ? zLo : (zMin + zMax) / 2
+        let finalZHi = zLo <= zHi ? zHi : (zMin + zMax) / 2
         return SIMD2<Float>(
-            max(xMin, min(xMax, p.x)),
-            max(zMin, min(zMax, p.y))
+            max(finalXLo, min(finalXHi, p.x)),
+            max(finalZLo, min(finalZHi, p.y))
         )
     }
 
@@ -170,8 +224,14 @@ enum SceneSelection {
         guard let id = id else { return }
         guard let target = findNode(named: "obj_\(id)", under: rootNode) else { return }
 
-        let (minVec, maxVec) = target.boundingBox
-        let size = SCNVector3(maxVec.x - minVec.x, maxVec.y - minVec.y, maxVec.z - minVec.z)
+        let bounds = localBounds(for: target)
+        let minVec = bounds.min
+        let maxVec = bounds.max
+        let size = SCNVector3(
+            max(0.12, maxVec.x - minVec.x),
+            max(0.12, maxVec.y - minVec.y),
+            max(0.12, maxVec.z - minVec.z)
+        )
         let outline = SCNNode(geometry: SCNBox(
             width: CGFloat(size.x), height: CGFloat(size.y),
             length: CGFloat(size.z), chamferRadius: 0
@@ -182,14 +242,17 @@ enum SceneSelection {
             (minVec.y + maxVec.y) / 2,
             (minVec.z + maxVec.z) / 2
         )
-        outline.scale = SCNVector3(1.02, 1.02, 1.02)
+        outline.scale = SCNVector3(1.08, 1.08, 1.08)
         let material = SCNMaterial()
-        material.diffuse.contents = UIColor.clear
-        material.emission.contents = UIColor.cyan
+        material.diffuse.contents = UIColor.systemCyan
+        material.emission.contents = UIColor.systemCyan
         material.lightingModel = .constant
         material.isDoubleSided = true
         material.fillMode = .lines
+        material.readsFromDepthBuffer = false
+        material.writesToDepthBuffer = false
         outline.geometry?.firstMaterial = material
+        outline.renderingOrder = 1000
         target.addChildNode(outline)
     }
 
@@ -199,5 +262,46 @@ enum SceneSelection {
             if let found = findNode(named: name, under: child) { return found }
         }
         return nil
+    }
+
+    private static func localBounds(for node: SCNNode) -> (min: SCNVector3, max: SCNVector3) {
+        var hasPoint = false
+        var minVec = SCNVector3(
+            Float.greatestFiniteMagnitude,
+            Float.greatestFiniteMagnitude,
+            Float.greatestFiniteMagnitude
+        )
+        var maxVec = SCNVector3(
+            -Float.greatestFiniteMagnitude,
+            -Float.greatestFiniteMagnitude,
+            -Float.greatestFiniteMagnitude
+        )
+
+        node.enumerateChildNodes { child, _ in
+            guard child.name != highlightNodeName else { return }
+            let (childMin, childMax) = child.boundingBox
+            let corners = [
+                SCNVector3(childMin.x, childMin.y, childMin.z),
+                SCNVector3(childMin.x, childMin.y, childMax.z),
+                SCNVector3(childMin.x, childMax.y, childMin.z),
+                SCNVector3(childMin.x, childMax.y, childMax.z),
+                SCNVector3(childMax.x, childMin.y, childMin.z),
+                SCNVector3(childMax.x, childMin.y, childMax.z),
+                SCNVector3(childMax.x, childMax.y, childMin.z),
+                SCNVector3(childMax.x, childMax.y, childMax.z),
+            ]
+            for corner in corners {
+                let p = node.convertPosition(corner, from: child)
+                minVec = SCNVector3(min(minVec.x, p.x), min(minVec.y, p.y), min(minVec.z, p.z))
+                maxVec = SCNVector3(max(maxVec.x, p.x), max(maxVec.y, p.y), max(maxVec.z, p.z))
+                hasPoint = true
+            }
+        }
+
+        if hasPoint {
+            return (minVec, maxVec)
+        }
+        let (fallbackMin, fallbackMax) = node.boundingBox
+        return (fallbackMin, fallbackMax)
     }
 }

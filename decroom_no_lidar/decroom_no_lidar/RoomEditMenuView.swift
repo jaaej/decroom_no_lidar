@@ -2,13 +2,14 @@
 //  RoomEditMenuView.swift
 //  decroom_no_lidar
 //
-//  Plan 4a v3 — bottom edit sheet that shows:
-//   • [Delete] (visible when something is selected)
-//   • [Undo] (visible when canUndo)
+//  Plan 4a v4 — vertical side bar on the trailing edge of the screen
+//  with the editing actions. Easier to spot than a bottom sheet that
+//  competes with the Save Room overlay; matches the user-requested
+//  layout (vertical side bar).
 //
-//  Sits above CaptureFlowView's existing "Save Room / Rescan" bottom area
-//  so it doesn't get hidden. Move + Rotate are direct-manipulation
-//  gestures (drag furniture, two-finger twist) — no buttons needed.
+//   • Delete (when selectedObjectID != nil)
+//   • Lift toggle (when selectedObjectID != nil)
+//   • Undo (when canUndo)
 //
 
 import SwiftUI
@@ -17,60 +18,37 @@ struct RoomEditMenuView: View {
     @ObservedObject var editModel: RoomEditModel
 
     var body: some View {
-        VStack {
+        HStack {
             Spacer()
-            if shouldShowSheet {
-                actionSheet
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 180)   // clears the Save Room overlay
+            VStack(spacing: 14) {
+                Spacer()
+                if editModel.selectedObjectID != nil {
+                    deleteButton
+                    liftButton
+                }
+                if editModel.canUndo {
+                    undoButton
+                }
+                Spacer()
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 8)
+            .background(
+                Capsule().fill(.ultraThinMaterial)
+                    .opacity(shouldShowAny ? 1 : 0)
+            )
+            .padding(.trailing, 12)
+            .padding(.vertical, 80)   // pull away from notch + bottom Save Room
         }
         .animation(.easeInOut(duration: 0.15), value: editModel.selectedObjectID)
         .animation(.easeInOut(duration: 0.15), value: editModel.canUndo)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .allowsHitTesting(true)
+        .animation(.easeInOut(duration: 0.15), value: editModel.verticalDragMode)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(shouldShowAny)
     }
 
-    private var shouldShowSheet: Bool {
+    private var shouldShowAny: Bool {
         editModel.selectedObjectID != nil || editModel.canUndo
-    }
-
-    private var actionSheet: some View {
-        HStack(spacing: 12) {
-            if editModel.selectedObjectID != nil {
-                deleteButton
-                liftButton
-            }
-            Spacer()
-            if editModel.canUndo {
-                undoButton
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-
-    private var liftButton: some View {
-        Button {
-            editModel.verticalDragMode.toggle()
-        } label: {
-            Label("Lift", systemImage: "arrow.up.and.down")
-                .font(.body.weight(.medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .frame(minHeight: 44)
-                .background(
-                    editModel.verticalDragMode
-                        ? AnyShapeStyle(Color.accentColor.opacity(0.25))
-                        : AnyShapeStyle(Color.clear),
-                    in: Capsule()
-                )
-        }
-        .accessibilityIdentifier("editAction.Lift")
-        .tint(editModel.verticalDragMode ? .accentColor : .primary)
     }
 
     private var deleteButton: some View {
@@ -79,26 +57,54 @@ struct RoomEditMenuView: View {
                 editModel.delete(id)
             }
         } label: {
-            Label("Delete", systemImage: "trash")
-                .font(.body.weight(.medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .frame(minHeight: 44)
+            iconLabel("trash", text: "Delete", tint: .red, filled: false)
         }
         .accessibilityIdentifier("editAction.Delete")
-        .tint(.red)
+    }
+
+    private var liftButton: some View {
+        Button {
+            editModel.verticalDragMode.toggle()
+        } label: {
+            iconLabel(
+                "arrow.up.and.down",
+                text: "Lift",
+                tint: .accentColor,
+                filled: editModel.verticalDragMode
+            )
+        }
+        .accessibilityIdentifier("editAction.Lift")
     }
 
     private var undoButton: some View {
         Button {
             editModel.undo()
         } label: {
-            Label("Undo", systemImage: "arrow.uturn.backward")
-                .font(.body.weight(.medium))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .frame(minHeight: 44)
+            iconLabel("arrow.uturn.backward", text: "Undo", tint: .primary, filled: false)
         }
         .accessibilityIdentifier("editAction.Undo")
+    }
+
+    private func iconLabel(
+        _ systemImage: String,
+        text: String,
+        tint: Color,
+        filled: Bool
+    ) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .font(.title3)
+            Text(text)
+                .font(.caption2)
+        }
+        .foregroundStyle(filled ? .white : tint)
+        .frame(width: 52, height: 52)
+        .background(
+            Circle().fill(
+                filled
+                    ? AnyShapeStyle(tint)
+                    : AnyShapeStyle(Color.white.opacity(0.001))   // hit area
+            )
+        )
     }
 }
