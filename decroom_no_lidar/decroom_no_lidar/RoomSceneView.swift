@@ -73,21 +73,24 @@ struct RoomSceneView: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
+                if editingEnabled {
+                    RoomEditMenuView(editModel: editModel)
+                        .allowsHitTesting(true)
+                }
+
                 Button {
                     lightsEnabled.toggle()
                 } label: {
                     Image(systemName: lightsEnabled ? "lightbulb.fill" : "lightbulb.slash")
                         .font(.title3)
                         .foregroundStyle(lightsEnabled ? .yellow : .gray)
-                        .padding(10)
+                        .frame(width: 44, height: 44)
                         .background(.ultraThinMaterial, in: Circle())
                 }
-                .padding(10)
-
-                if editingEnabled {
-                    RoomEditMenuView(editModel: editModel)
-                        .allowsHitTesting(true)
-                }
+                .accessibilityIdentifier("roomScene.lightToggle")
+                .padding(.top, 64)
+                .padding(.trailing, 12)
+                .zIndex(2)
             }
         }
     }
@@ -147,8 +150,11 @@ struct RoomSceneRepresentable: UIViewRepresentable {
         // Plan 4a Task 11: apply / clear selection highlight.
         SceneSelection.setSelected(editModel?.selectedObjectID, in: scene.rootNode)
 
-        // Plan 4a Task 12: install / remove pan-or-rotate gestures.
-        context.coordinator.setActiveAction(editModel?.activeAction)
+        // Plan 4a v2 (direct manipulation): gestures are installed once in
+        // RoomEditingCoordinator.attach(...) and stay active for the lifetime
+        // of the view. No mode toggle needed — the drag recognizer decides
+        // per-touch whether to claim the gesture (finger on furniture) or
+        // yield to SceneKit's camera pan (finger on empty space).
     }
 
     private func updateLighting(in scene: SCNScene) {
