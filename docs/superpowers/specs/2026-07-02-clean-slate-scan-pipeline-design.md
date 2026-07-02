@@ -42,7 +42,7 @@ PHONE (capture, real-time)
   Existing VideoRecorderView UX unchanged (coverage arc, upload)
   Upload ~20–40 MB
 
-BACKEND (GPU, target < 2 min)
+BACKEND (GPU, perceived-wait target 30–60 s; hard cap 2 min)
   1. Decode video; sample frames (~5 fps track set, ~2 fps depth set)
   2. GEOMETRY   MoGe-2 depth+normals per depth-frame
                 → per-frame metric anchor vs ARKit sparse points (median scale)
@@ -67,6 +67,8 @@ PHONE (render + edit)
   SceneKit viewer + Plan 4a correction UI unchanged
   Stock asset per category (Kenney CC0), scaled to measured extents
 ```
+
+**Performance budget (user requirement: results in 30–60 s).** Achieved by: (1) streaming the upload during capture so it costs ~0 perceived seconds; (2) running the geometry branch (stages 2) and detection branch (stage 3 pre-lift) concurrently — they are independent until lifting; (3) sampling rates 1 fps depth / 3 fps tracking / 0.5 fps detection, 720p inference for detection+tracking. The two budget risks are SAM 2's per-object scaling on many-object rooms and LLMDet's unpublished per-frame speed — spikes S1/S3 must record wall-clock times, and the fallbacks are lower sampling, OWLv2/Florence-2, or a faster GPU tier. All stage timings above are estimates until Phase 0 measures them.
 
 ## 3. The four sub-problems
 
