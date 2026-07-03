@@ -51,6 +51,14 @@ struct VideoRecorderView: View {
     @State private var showNoWallsWarning = false
     @State private var lastUploadedPayload: ScanUploadPayload? = nil
 
+    // Phase-0 debug recorder (spike-quality video + pose JSONL capture,
+    // independent of the normal upload flow). Off by default; toggled via
+    // a small, unobtrusive icon so it doesn't interfere with the main flow.
+    @State private var debugRecorder: DebugScanRecorder? = nil
+    @State private var isDebugRecording = false
+    @State private var debugShareURL: URL? = nil
+    @State private var showDebugShare = false
+
     /// Number of frames being uploaded right now. Prefers the in-flight
     /// payload's keyframe count (works for both fresh scans and
     /// "Use Last Capture"); falls back to the recorder's live count for
@@ -69,6 +77,22 @@ struct VideoRecorderView: View {
             // LAYER 1: Live AR camera — full-screen, no overlay
             GuidedARViewContainer(recorder: recorder)
                 .ignoresSafeArea()
+
+            // LAYER 1.5: Debug recorder toggle — small, unobtrusive, top-trailing
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: toggleDebugRecording) {
+                        Image(systemName: isDebugRecording ? "record.circle.fill" : "ladybug")
+                            .font(.callout)
+                            .foregroundStyle(isDebugRecording ? .red : .white.opacity(0.25))
+                            .padding(10)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.top, 54)
+            .padding(.trailing, 12)
 
             // LAYER 2: UI controls
             VStack(spacing: 0) {
@@ -313,9 +337,21 @@ struct VideoRecorderView: View {
                     featureGridCellCount: captureData.featureGridCellCount
                 )
             }
+            recorder.onRawFrame = { frame in
+                debugRecorder?.append(frame)
+            }
         }
         .onDisappear {
             if isScanning { recorder.stop() }
+            if isDebugRecording {
+                isDebugRecording = false
+                debugRecorder?.stop { _ in }
+            }
+        }
+        .sheet(isPresented: $showDebugShare) {
+            if let url = debugShareURL {
+                DebugScanShareSheet(activityItems: [url])
+            }
         }
         .onChange(of: recorder.currentYaw) { _, _ in
             let pos = SIMD3<Float>(
@@ -468,6 +504,48 @@ struct VideoRecorderView: View {
         print("[VideoRecorderView] Re-uploading last capture scan=\(payload.scanID) keyframes=\(payload.keyframes.count)")
         processor.processPhoneFirstPayload(payload)
     }
+
+    // MARK: - Debug recorder (Phase-0 spike)
+
+    /// Starts or stops the debug recorder. On stop, presents a share sheet
+    /// for the recorded `scan_<timestamp>/` folder (video.mov + frames.jsonl
+    /// + points.jsonl + stats.json) so it can be AirDropped off-device.
+    private func toggleDebugRecording() {
+        if isDebugRecording {
+            isDebugRecording = false
+            let rec = debugRecorder
+            rec?.stop { url in
+                DispatchQueue.main.async {
+                    debugRecorder = nil
+                    if let url = url {
+                        debugShareURL = url
+                        showDebugShare = true
+                    }
+                }
+            }
+        } else {
+            let rec = DebugScanRecorder()
+            do {
+                try rec.start()
+                debugRecorder = rec
+                isDebugRecording = true
+            } catch {
+                print("[VideoRecorderView] DebugScanRecorder start failed: \(error)")
+            }
+        }
+    }
+}
+
+/// Thin wrapper presenting a UIActivityViewController (AirDrop/Files/etc.)
+/// for the debug recorder's output folder.
+private struct DebugScanShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {

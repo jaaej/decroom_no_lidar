@@ -127,6 +127,10 @@ final class GuidedARFrameRecorder: ObservableObject {
     /// Callback invoked on main thread when a keyframe is accepted in video mode
     var onKeyframeCaptured: ((CaptureData) -> Void)?
 
+    /// Optional hook for the Phase-0 debug recorder (DebugScanRecorder):
+    /// invoked with every raw ARFrame while a scan is actively recording.
+    var onRawFrame: ((ARFrame) -> Void)?
+
     // AR scene feedback
     weak var arView: ARView?
     private var markerRootAnchor: AnchorEntity?
@@ -491,6 +495,7 @@ final class GuidedARFrameRecorder: ObservableObject {
 
     func handle(frame: ARFrame) {
         guard isRecording else { return }
+        onRawFrame?(frame)
         latestFrame = frame
         latestCameraTransform = frame.camera.transform
 
