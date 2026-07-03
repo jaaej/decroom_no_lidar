@@ -1,0 +1,4 @@
+
+# Claude worktrees (CLAUDE.md worktree rules) + SDD scratch
+.claude/worktrees/
+.superpowers/
