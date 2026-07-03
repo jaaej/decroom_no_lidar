@@ -337,15 +337,21 @@ struct VideoRecorderView: View {
                     featureGridCellCount: captureData.featureGridCellCount
                 )
             }
-            recorder.onRawFrame = { frame in
-                debugRecorder?.append(frame)
-            }
+            // Forwarding closure itself is (re)assigned in toggleDebugRecording,
+            // weak-capturing the specific DebugScanRecorder instance so a
+            // stop→start re-tap can't forward frames into the wrong recorder.
         }
         .onDisappear {
             if isScanning { recorder.stop() }
             if isDebugRecording {
                 isDebugRecording = false
-                debugRecorder?.stop { _ in }
+                recorder.onRawFrame = nil
+                let rec = debugRecorder
+                rec?.stop { _ in
+                    DispatchQueue.main.async {
+                        if debugRecorder === rec { debugRecorder = nil }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showDebugShare) {
@@ -513,10 +519,18 @@ struct VideoRecorderView: View {
     private func toggleDebugRecording() {
         if isDebugRecording {
             isDebugRecording = false
+            // Stop forwarding immediately so no more frames reach a recorder
+            // that's about to finish writing.
+            recorder.onRawFrame = nil
             let rec = debugRecorder
             rec?.stop { url in
                 DispatchQueue.main.async {
-                    debugRecorder = nil
+                    // Identity-guard: a fast stop→start re-tap may already
+                    // have replaced debugRecorder with a new, actively-
+                    // recording instance by the time this completion runs.
+                    if debugRecorder === rec {
+                        debugRecorder = nil
+                    }
                     if let url = url {
                         debugShareURL = url
                         showDebugShare = true
@@ -529,6 +543,12 @@ struct VideoRecorderView: View {
                 try rec.start()
                 debugRecorder = rec
                 isDebugRecording = true
+                // Weak-capture this specific instance rather than reading
+                // the mutable debugRecorder property, so the closure can't
+                // be redirected to a later recorder instance.
+                recorder.onRawFrame = { [weak rec] frame in
+                    rec?.append(frame)
+                }
             } catch {
                 print("[VideoRecorderView] DebugScanRecorder start failed: \(error)")
             }

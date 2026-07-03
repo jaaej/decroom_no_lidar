@@ -23,9 +23,17 @@ final class DebugScanRecorder {
     private var startTime: TimeInterval?
     private var thermalEvents: [[String: Any]] = []
     private var lastThermal: String = "nominal"
+    // Cross-thread stop guard: ARKit delivers frames on a background queue,
+    // while stop() runs on the main queue. This is a plain (unsynchronized)
+    // Bool — acceptable for spike code since the worst case is a single
+    // stray append racing the flag flip, not a torn read.
+    private var isStopped = false
 
     func start() throws {
-        let stamp = Int(Date().timeIntervalSince1970)
+        // Millisecond resolution: two starts within the same second would
+        // otherwise collide on the same "scan_<seconds>" folder and throw
+        // when video.mov already exists.
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
         let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("scan_\(stamp)", isDirectory: true)
         try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
@@ -57,6 +65,7 @@ final class DebugScanRecorder {
     }
 
     func append(_ frame: ARFrame) {
+        guard !isStopped else { return }
         frameCounter += 1
         guard frameCounter % 2 == 0, let input = input, let adaptor = adaptor else { return }
         if startTime == nil {
@@ -120,6 +129,7 @@ final class DebugScanRecorder {
     }
 
     func stop(completion: @escaping (URL?) -> Void) {
+        isStopped = true
         guard let w = writer, let d = dir else { completion(nil); return }
         input?.markAsFinished()
         w.finishWriting {
