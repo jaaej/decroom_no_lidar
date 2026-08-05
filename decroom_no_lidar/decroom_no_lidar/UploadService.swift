@@ -27,7 +27,8 @@ enum UploadError: Error, LocalizedError {
 
 struct UploadService {
     /// Fallback URL if Bonjour discovery hasn't found the server yet.
-    static let fallbackURL = "http://192.168.0.125:8000/api/upload"
+    /// Set this to your backend host's LAN IP (the primary path is Bonjour discovery).
+    static let fallbackURL = "http://YOUR_SERVER_IP:8000/api/upload"
     private static let uploadTimeoutSeconds: TimeInterval = 1800
     private static let serverProbeTimeoutSeconds: TimeInterval = 8
 
