@@ -26,20 +26,20 @@ enum SceneSelection {
     // MARK: - Wall snap
 
     /// Project `position` onto the nearest wall segment for wall-snap
-    /// categories, then offset inward by `inwardOffset` so the object's
-    /// geometry doesn't extend past the wall. Pass the object's metadata
-    /// so the offset matches its actual depth (half of the shorter XZ
-    /// dimension). Non-wall-snap categories return position unchanged.
+    /// categories, then offset inward by the object's half-extent along
+    /// the wall's inward normal so the rendered geometry sits flush with
+    /// the inside face of the wall. Non-wall-snap categories return
+    /// position unchanged.
     static func wallSnap(
         position: SIMD2<Float>,
         category: String,
         walls: [Wall],
-        objectMetadata: ObjectMetadata? = nil
+        objectMetadata: ObjectMetadata? = nil,
+        rotationY: Double = 0
     ) -> SIMD2<Float> {
         guard wallSnapCategories.contains(category) else { return position }
         guard !walls.isEmpty else { return position }
 
-        let inset = inwardOffset(for: objectMetadata)
         let center = roomCenter(walls: walls)
 
         var bestDist: Float = .greatestFiniteMagnitude
@@ -52,13 +52,15 @@ enum SceneSelection {
             let d = simd_distance(position, projected)
             if d < bestDist {
                 bestDist = d
-                // Compute inward normal of this wall (toward room center).
                 let dir = b - a
                 let len = simd_length(dir)
                 if len > 1e-6 {
                     let n = simd_normalize(SIMD2<Float>(-dir.y, dir.x))
                     let toCenter = center - projected
                     let inward = simd_dot(n, toCenter) >= 0 ? n : -n
+                    let inset = halfExtentAlong(
+                        normal: inward, meta: objectMetadata, rotationY: rotationY
+                    )
                     snapped = projected + inward * inset
                 } else {
                     snapped = projected
@@ -68,13 +70,39 @@ enum SceneSelection {
         return snapped
     }
 
-    /// Half of the object's shortest XZ dimension — the side that faces
-    /// the wall when the object is in standard "against the wall" pose.
-    /// Falls back to 15 cm for missing metadata.
-    private static func inwardOffset(for meta: ObjectMetadata?) -> Float {
+    /// World-space AABB half-extents (halfX, halfZ) of an object's
+    /// footprint after rotating by `rotationY` about the Y axis.
+    /// width is along local X, length along local Z. Falls back to a
+    /// uniform 15 cm half-extent when metadata is missing.
+    static func rotatedHalfExtents(
+        meta: ObjectMetadata?, rotationY: Double
+    ) -> SIMD2<Float> {
+        guard let meta = meta else { return SIMD2<Float>(0.15, 0.15) }
+        let hx = Float(meta.width) / 2
+        let hz = Float(meta.length) / 2
+        let c = abs(Float(cos(rotationY)))
+        let s = abs(Float(sin(rotationY)))
+        return SIMD2<Float>(
+            max(0.05, hx * c + hz * s),
+            max(0.05, hx * s + hz * c)
+        )
+    }
+
+    /// Half-extent of the rotated OBB along an arbitrary unit direction.
+    /// Used to inset wall-snap positions by exactly enough that the
+    /// object's far edge sits on the wall plane.
+    private static func halfExtentAlong(
+        normal n: SIMD2<Float>, meta: ObjectMetadata?, rotationY: Double
+    ) -> Float {
         guard let meta = meta else { return 0.15 }
-        let depth = Float(min(meta.width, meta.length))
-        return max(0.05, depth / 2)
+        let hx = Float(meta.width) / 2
+        let hz = Float(meta.length) / 2
+        // Local x-axis = (cos θ, sin θ); local z-axis = (-sin θ, cos θ).
+        let cosT = Float(cos(rotationY))
+        let sinT = Float(sin(rotationY))
+        let projX = abs(n.x * cosT + n.y * sinT)
+        let projZ = abs(-n.x * sinT + n.y * cosT)
+        return max(0.05, hx * projX + hz * projZ)
     }
 
     private static func roomCenter(walls: [Wall]) -> SIMD2<Float> {
@@ -106,39 +134,68 @@ enum SceneSelection {
 
     // MARK: - Footprint clamp
 
-    /// Clamp `p` to the rectangular bbox of all wall endpoints, optionally
-    /// inset by the object's half-depth so the rendered geometry stays
-    /// inside the walls even at the bbox boundary.
+    /// Clamp `p` so the object's rotated footprint stays inside every
+    /// wall's inward half-plane. Walls are NOT assumed axis-aligned —
+    /// `RoomGeometryBuilder` consolidates in a Manhattan frame and rotates
+    /// back by the room's yaw, so the world-space room is generally a
+    /// rotated rectangle (or arbitrary polygon). A simple axis-aligned
+    /// bbox clamp lets objects sit in bbox-but-outside-room corners; this
+    /// per-wall half-plane clamp does not.
+    ///
+    /// Algorithm: for each wall, compute the inward unit normal (toward
+    /// the centroid of wall endpoints) and the half-plane offset so the
+    /// far edge of the object's rotated AABB sits exactly on the inner
+    /// face of the wall. Iterate a few times so corner constraints from
+    /// adjacent walls settle.
     static func clampToFootprint(
         _ p: SIMD2<Float>, walls: [Wall],
-        objectMetadata: ObjectMetadata? = nil
+        objectMetadata: ObjectMetadata? = nil,
+        rotationY: Double = 0
     ) -> SIMD2<Float> {
         guard !walls.isEmpty else { return p }
-        var xMin: Float = .greatestFiniteMagnitude
-        var xMax: Float = -.greatestFiniteMagnitude
-        var zMin: Float = .greatestFiniteMagnitude
-        var zMax: Float = -.greatestFiniteMagnitude
-        for w in walls {
-            for endpoint in [w.start, w.end] {
-                guard endpoint.count >= 2 else { continue }
-                let x = Float(endpoint[0])
-                let z = Float(endpoint[1])
-                xMin = min(xMin, x); xMax = max(xMax, x)
-                zMin = min(zMin, z); zMax = max(zMax, z)
-            }
+        let center = roomCenter(walls: walls)
+
+        struct Plane {
+            let point: SIMD2<Float>
+            let inward: SIMD2<Float>     // unit normal toward room interior
+            let minDistance: Float       // required signed distance from `point` along `inward`
         }
-        let inset = inwardOffset(for: objectMetadata)
-        let xLo = xMin + inset, xHi = xMax - inset
-        let zLo = zMin + inset, zHi = zMax - inset
-        // Guard against tiny rooms where inset would invert the bounds.
-        let finalXLo = xLo <= xHi ? xLo : (xMin + xMax) / 2
-        let finalXHi = xLo <= xHi ? xHi : (xMin + xMax) / 2
-        let finalZLo = zLo <= zHi ? zLo : (zMin + zMax) / 2
-        let finalZHi = zLo <= zHi ? zHi : (zMin + zMax) / 2
-        return SIMD2<Float>(
-            max(finalXLo, min(finalXHi, p.x)),
-            max(finalZLo, min(finalZHi, p.y))
-        )
+        var planes: [Plane] = []
+        planes.reserveCapacity(walls.count)
+        for w in walls {
+            guard w.start.count >= 2, w.end.count >= 2 else { continue }
+            let a = SIMD2<Float>(Float(w.start[0]), Float(w.start[1]))
+            let b = SIMD2<Float>(Float(w.end[0]),   Float(w.end[1]))
+            let dir = b - a
+            let len = simd_length(dir)
+            guard len > 1e-4 else { continue }
+            let nRaw = simd_normalize(SIMD2<Float>(-dir.y, dir.x))
+            let toCenter = center - a
+            let inward = simd_dot(nRaw, toCenter) >= 0 ? nRaw : -nRaw
+            let halfExt = halfExtentAlong(normal: inward, meta: objectMetadata, rotationY: rotationY)
+            // Half the visual wall thickness, so the object sits flush
+            // with the inner face rather than the wall centerline.
+            let wallInset: Float = 0.04
+            planes.append(Plane(point: a, inward: inward, minDistance: halfExt + wallInset))
+        }
+        guard !planes.isEmpty else { return p }
+
+        var result = p
+        // 4 iterations is plenty for a rectangle (1-2 in practice) and
+        // gives quasi-stable behavior for non-orthogonal walls.
+        for _ in 0..<4 {
+            var moved = false
+            for plane in planes {
+                let d = simd_dot(result - plane.point, plane.inward)
+                let deficit = plane.minDistance - d
+                if deficit > 0 {
+                    result += plane.inward * deficit
+                    moved = true
+                }
+            }
+            if !moved { break }
+        }
+        return result
     }
 
     // MARK: - Hit test (Task 7)

@@ -44,7 +44,10 @@ final class RoomEditModel: ObservableObject {
     private var previousObjects: [RoomObject]?
 
     init(initial: RoomPayload) {
-        self.roomPayload = initial
+        // Normalize backend geometry on entry: drop overlapping floor
+        // furniture duplicates, snap floor furniture Y to 0, lift
+        // stackables onto any surface their XZ center is over.
+        self.roomPayload = initial.normalized()
     }
 
     // MARK: - Selection

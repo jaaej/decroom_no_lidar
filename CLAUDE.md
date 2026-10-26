@@ -9,22 +9,41 @@
 ## Build Commands
 ```bash
 # iOS app
-/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme decroom_no_lidar -project /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar/decroom_no_lidar.xcodeproj -destination 'generic/platform=iOS' build
+/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -scheme decroom_no_lidar -project /Users/jaejeon/Decroom/decroom_no_lidar/decroom_no_lidar/decroom_no_lidar.xcodeproj -destination 'generic/platform=iOS' build
 
 # Backend
-cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar/backend
+cd /Users/jaejeon/Decroom/decroom_no_lidar/decroom_no_lidar/backend
 export DECROOM_ENABLE_SPATIALLM=true
 export DECROOM_SPATIALLM_API_URL=http://localhost:8100/infer
 python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Critical Rules
-- NEVER suggest moving the project directory
 - ARKit `capturedImage` is ALWAYS landscape-right — apply `.oriented(.right)` and swap intrinsics for portrait
 - SceneKit `eulerAngles.y` is CW positive — negate backend `rotation_y` (CCW positive)
 - USDZ Kenney models need bounding box measurement + median scale factor + Y-offset to floor
 - Do NOT make changes the user didn't ask for — no extra refactoring, no unsolicited docstrings
+- **If the user is wrong, say so directly. If a task is low quality or has a better approach, say so once — without being preachy — then do the task if the user confirms. Never agree with something incorrect to avoid friction.**
 - **NEVER recommend destructive iOS actions without first stating exactly what user data will be lost.** This includes: "Delete App" (wipes the entire app sandbox — `Documents/decroom_saved_rooms.json` and `Documents/last_payload/` are GONE), "Reset Content & Settings" on the device, force-erasing a simulator, or any `xcrun simctl erase`. Decroom has NO cloud backup — once these are deleted, they cannot be recovered. Default to non-destructive alternatives (Clean Build Folder, `xcodebuild clean`, just hitting Run again to reinstall over the top, etc.). If a destructive action genuinely is the right move, first offer to pull a backup via `xcrun devicectl device copy from` and wait for the user to confirm before proceeding.
+
+## Anti-sycophancy self-checks (run these AFTER any non-trivial recommendation, BEFORE replying)
+The user has caught a recurring pattern: confidently endorsing my own plan, then later finding a better one. To break the consistency bias that causes this, ask myself these three questions explicitly after every plan or recommendation. Surface anything they reveal — do not bury it.
+
+1. **What would change my mind about this?** Enumerate concrete conditions under which this plan would be wrong. If I can't name 2-3, I haven't actually evaluated it — I've just defended it.
+2. **If I came to this cold with no prior context, would I still recommend it?** This catches inherited-premise blindness. If the answer is "no, I'd recommend X instead," surface X.
+3. **Why isn't there a better option?** Forces a search outside the current frame. If I haven't checked existing memory files (especially `pipeline_improvements_research.md` and `reasoning_anti_patterns.md`), do that before answering.
+
+When the user asks "is this good?" — treat that as "stress-test this," not "validate me." Lead with uncertainties and gaps, not with confidence.
+
+## Verify before claiming
+
+Any claim about a value, behavior, or current state — whether sourced from an agent report, code reading, a paper, web search, or memory — is a HYPOTHESIS until verified by running a command or reading actual data. Before including such a claim in a recommendation, tradeoff table, or "issues to fix" list, run the verification first and report what was actually observed.
+
+Code-reading (mine or an agent's) is hypothesis generation, not evidence. Two agents independently reading the same code produce two hypotheses, not convergent evidence — they may both be wrong in the same way.
+
+Verification is cheap. If it takes <5 minutes (print a value, grep a file, run a one-liner), just do it. If it takes longer, surface the cost explicitly and let the user decide whether to verify or proceed on the hypothesis.
+
+Specific failure mode this prevents: synthesizing an agent's "X is broken" finding into "fix X" without running the 30-second check that would have shown X is fine. Recurring pattern flagged across multiple sessions — including the 2026-05-24 BoxFusion audit where I claimed an intrinsics rotation bug existed and a gravity convention was wrong, both of which collapsed on a 30-second Python print.
 
 ## Architecture (Phone-First — decided 2026-04-16)
 - **Design direction**: phone does geometry (ARKit planes + on-device depth), backend adds semantics only

@@ -237,7 +237,17 @@ enum RoomSceneBuilder {
         lightsEnabled: Bool
     ) -> SCNScene {
         print("\n[Decroom] ════════════════════════════════════════════════════")
-        print("[Decroom] BUILD SCENE — room=\(String(format: "%.1f", env.width))×\(String(format: "%.1f", env.length))×\(String(format: "%.1f", env.height))m  objects=\(objects.count)  walls=\(env.walls.count)")
+        print("[Decroom] BUILD SCENE [clamp v3 half-plane] — room=\(String(format: "%.1f", env.width))×\(String(format: "%.1f", env.length))×\(String(format: "%.1f", env.height))m  objects=\(objects.count)  walls=\(env.walls.count)")
+        for (i, w) in env.walls.enumerated() {
+            let sx = w.start.count >= 2 ? w.start[0] : .nan
+            let sz = w.start.count >= 2 ? w.start[1] : .nan
+            let ex = w.end.count   >= 2 ? w.end[0]   : .nan
+            let ez = w.end.count   >= 2 ? w.end[1]   : .nan
+            print(String(format: "[Decroom]   wall[%d] (%.3f, %.3f) -> (%.3f, %.3f)  door=%@ window=%@",
+                         i, sx, sz, ex, ez,
+                         w.has_door ? "y" : "n",
+                         w.has_window ? "y" : "n"))
+        }
         print("[Decroom] ════════════════════════════════════════════════════")
 
         let scene = SCNScene()
@@ -514,7 +524,8 @@ enum RoomSceneBuilder {
         let xz = SceneSelection.clampToFootprint(
             SIMD2<Float>(Float(obj.position.x), Float(obj.position.z)),
             walls: walls,
-            objectMetadata: obj.metadata
+            objectMetadata: obj.metadata,
+            rotationY: obj.rotation_y
         )
         containerNode.position = SCNVector3(
             xz.x,
@@ -538,7 +549,7 @@ enum RoomSceneBuilder {
 
         // ── Per-object placement audit log ─────────────────────────────
         let rotDeg = -Float(obj.rotation_y) * 180.0 / .pi
-        print("[Decroom] makeFurnitureNode: \(obj.type) id=\(obj.id) pos=(\(String(format: "%.3f", obj.position.x)), \(String(format: "%.3f", obj.position.y)), \(String(format: "%.3f", obj.position.z))) rotation_y=\(String(format: "%.4f", obj.rotation_y)) (scene_y=\(String(format: "%.1f", rotDeg))°) asset=\(assetName) usdz=\(usedUSDZ) dims=(\(String(format: "%.3f", obj.metadata.width)), \(String(format: "%.3f", obj.metadata.height)), \(String(format: "%.3f", obj.metadata.length)))")
+        print("[Decroom] makeFurnitureNode: \(obj.type) id=\(obj.id) pos_in=(\(String(format: "%.3f", obj.position.x)), \(String(format: "%.3f", obj.position.y)), \(String(format: "%.3f", obj.position.z))) pos_clamped=(\(String(format: "%.3f", xz.x)), \(String(format: "%.3f", xz.y))) walls_in=\(walls.count) rotation_y=\(String(format: "%.4f", obj.rotation_y)) (scene_y=\(String(format: "%.1f", rotDeg))°) asset=\(assetName) usdz=\(usedUSDZ) dims=(\(String(format: "%.3f", obj.metadata.width)), \(String(format: "%.3f", obj.metadata.height)), \(String(format: "%.3f", obj.metadata.length)))")
 
         return containerNode
     }
@@ -621,15 +632,22 @@ enum RoomSceneBuilder {
             }
         }
 
-        // Position so bottom sits on y=0
-        let (scaledMin, _) = wrapperNode.boundingBox
+        // Position so the bottom sits on y=0 AND the XZ geometric center
+        // sits on the wrapper origin. Kenney models' local pivots are not
+        // centered — leaving X/Z at 0 places the wrapper origin at the
+        // model's local origin, which can be near a corner. The clamp
+        // assumes the container's world position is the object's XZ
+        // center, so the mesh has to be centered on that origin.
+        let (scaledMin, scaledMax) = wrapperNode.boundingBox
         let actualMinY = scaledMin.y * wrapperNode.scale.y
-        wrapperNode.position = SCNVector3(0, -actualMinY, 0)
+        let actualCenterX = (scaledMin.x + scaledMax.x) / 2 * wrapperNode.scale.x
+        let actualCenterZ = (scaledMin.z + scaledMax.z) / 2 * wrapperNode.scale.z
+        wrapperNode.position = SCNVector3(-actualCenterX, -actualMinY, -actualCenterZ)
 
         // ── Axis correction audit log ──────────────────────────────────
         if let target = targetSize {
             let finalScale = wrapperNode.scale.x  // uniform
-            print("[Decroom] loadUSDZModel: \(name) post_correction_bbox=(\(String(format: "%.3f", modelW)), \(String(format: "%.3f", modelH)), \(String(format: "%.3f", modelL))) target=(\(String(format: "%.3f", target.width)), \(String(format: "%.3f", target.height)), \(String(format: "%.3f", target.length))) scale=\(String(format: "%.3f", finalScale)) yOffset=\(String(format: "%.4f", -actualMinY))")
+            print("[Decroom] loadUSDZModel: \(name) post_correction_bbox=(\(String(format: "%.3f", modelW)), \(String(format: "%.3f", modelH)), \(String(format: "%.3f", modelL))) target=(\(String(format: "%.3f", target.width)), \(String(format: "%.3f", target.height)), \(String(format: "%.3f", target.length))) scale=\(String(format: "%.3f", finalScale)) xOffset=\(String(format: "%.4f", -actualCenterX)) yOffset=\(String(format: "%.4f", -actualMinY)) zOffset=\(String(format: "%.4f", -actualCenterZ))")
         }
 
         return wrapperNode

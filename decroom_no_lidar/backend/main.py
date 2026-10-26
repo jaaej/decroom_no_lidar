@@ -174,6 +174,29 @@ async def upload_phone_first(
         log_bytes = await scan_log.read() if scan_log is not None else b""
         yolo_bytes = await yolo_objects.read() if yolo_objects is not None else b""
 
+        # Dump raw keyframe JPEGs for offline use (Marble spike, inspection).
+        try:
+            kf_root = Path("/tmp/decroom_keyframes")
+            kf_dir = kf_root / room_id
+            kf_dir.mkdir(parents=True, exist_ok=True)
+            for i, kb in enumerate(keyframe_bytes):
+                (kf_dir / f"keyframe_{i:02d}.jpg").write_bytes(kb)
+            latest_kf = kf_root / "latest"
+            if latest_kf.is_symlink() or latest_kf.exists():
+                latest_kf.unlink()
+            os.symlink(str(kf_dir), str(latest_kf))
+            logger.info("Dumped %d keyframes to %s", len(keyframe_bytes), kf_dir)
+
+            # Prune scan folders older than 7 days.
+            cutoff = time.time() - 7 * 86400
+            for child in kf_root.iterdir():
+                if child.is_symlink() or not child.is_dir():
+                    continue
+                if child.stat().st_mtime < cutoff:
+                    shutil.rmtree(child, ignore_errors=True)
+        except Exception as e:
+            logger.warning("Failed to dump/prune keyframes (non-fatal): %s", e)
+
         try:
             payload = parse_payload(
                 room_geom_bytes, ply_bytes, manifest_bytes,

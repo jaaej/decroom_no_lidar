@@ -99,21 +99,15 @@ enum DR {
 extension View {
     /// Spring-animated 0.97 scale on press. Used on tappable cards.
     func drPressable() -> some View {
-        self.modifier(DRPressableModifier())
+        self.buttonStyle(DRPressableButtonStyle())
     }
 }
 
-private struct DRPressableModifier: ViewModifier {
-    @State private var pressed = false
-    func body(content: Content) -> some View {
-        content
-            .scaleEffect(pressed ? 0.97 : 1)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: pressed)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in pressed = true }
-                    .onEnded   { _ in pressed = false }
-            )
+struct DRPressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 

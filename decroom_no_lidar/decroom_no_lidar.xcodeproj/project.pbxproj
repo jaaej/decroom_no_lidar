@@ -101,6 +101,7 @@
 				ContentView.swift,
 				CoverageEngine.swift,
 				decroom_no_lidarApp.swift,
+				FurnitureScanView.swift,
 				HomeView.swift,
 				kenney_bed.usdz,
 				kenney_bookshelf.usdz,
@@ -123,7 +124,6 @@
 				RoomStore.swift,
 				ScanGuidanceOverlayView.swift,
 				ServerDiscovery.swift,
-				FurnitureScanView.swift,
 				UploadService.swift,
 				VideoRecorderView.swift,
 			);

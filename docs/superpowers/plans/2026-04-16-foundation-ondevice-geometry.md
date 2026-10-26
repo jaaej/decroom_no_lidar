@@ -33,7 +33,15 @@
 - `decroom_no_lidar/decroom_no_lidar/decroom_no_lidar/DepthAnythingV2Small.mlpackage` — Core ML depth model (~20MB)
 
 **Modified:**
-- `decroom_no_lidar/decroom_no_lidar/decroom_no_lidar.xcodeproj/project.pbxproj` — register new files + model resource
+- `decroom_no_lidar/decroom_no_lidar/decroom_no_lidar.xcodeproj/project.pbxproj` — only for the Core ML model (bundle resource). Source files auto-discovered via synchronized file groups; no pbxproj edit needed for `.swift` files.
+
+## IMPORTANT: Xcode Synchronized File Groups
+
+This project uses `PBXFileSystemSynchronizedRootGroup` in `project.pbxproj` (see lines 134-153). This means **Xcode auto-discovers all `.swift` files** in `decroom_no_lidar/`, `decroom_no_lidarTests/`, and `decroom_no_lidarUITests/` automatically.
+
+**Do NOT manually edit `project.pbxproj` for new `.swift` files.** Just create the file at the right path and it's immediately part of the build. The plan's "Step 4: Register files in Xcode project" instructions below are OBSOLETE for `.swift` files — skip them. Only the Core ML model (`.mlpackage` bundle resource in Task 3) still requires Xcode's UI to add.
+
+(The legacy `PBXBuildFile` / `PBXFileReference` entries you see in pbxproj are stale, in a "Recovered References" group not wired into any target.)
 
 ---
 
@@ -45,17 +53,17 @@ Before starting, verify the environment is ready.
 
 Run:
 ```bash
-xcrun simctl list devices available | grep "iPhone 15"
+xcrun simctl list devices available | grep "iPhone 17"
 ```
 
-Expected: at least one `iPhone 15 Pro` line with `(Booted)` or `(Shutdown)`. If missing, install via Xcode → Settings → Platforms.
+Expected: at least one `iPhone 17 Pro` line with `(Booted)` or `(Shutdown)`. If unavailable, substitute any available iPhone simulator in subsequent `xcodebuild` commands (e.g., `iPhone 16 Pro`, `iPhone 15 Pro`). The test code itself is simulator-agnostic.
 
 - [ ] **Verify test target runs baseline test**
 
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/decroom_no_lidarTests/example 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/decroom_no_lidarTests/example 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **`. If it fails, fix before continuing.
@@ -123,7 +131,7 @@ struct DeviceCapabilitiesTests {
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/DeviceCapabilitiesTests 2>&1 | tail -30
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/DeviceCapabilitiesTests 2>&1 | tail -30
 ```
 
 Expected: compile failure with "cannot find 'DeviceCapabilities' in scope".
@@ -261,7 +269,7 @@ Find the existing line containing `FurnitureScanView.swift in Sources` (there ar
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/DeviceCapabilitiesTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/DeviceCapabilitiesTests 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **` with 7 tests passing.
@@ -353,7 +361,7 @@ struct ScanLoggerTests {
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/ScanLoggerTests 2>&1 | tail -30
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/ScanLoggerTests 2>&1 | tail -30
 ```
 
 Expected: compile failure with "cannot find 'ScanLogger' in scope".
@@ -479,7 +487,7 @@ Use IDs `C201B116/C201A116` and `C201B117/C201A117` to avoid collisions.
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/ScanLoggerTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/ScanLoggerTests 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **` with 4 tests passing.
@@ -634,7 +642,7 @@ struct DepthRunnerTests {
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/DepthRunnerTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/DepthRunnerTests 2>&1 | tail -20
 ```
 
 Expected: compile failure with "cannot find 'DepthRunner' in scope".
@@ -754,7 +762,7 @@ Follow Task 1 Step 4 pattern. Use IDs `C201B118/C201A118` for `DepthRunner.swift
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/DepthRunnerTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/DepthRunnerTests 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **` with 3 tests passing. If inference fails because the simulator doesn't have a GPU, the test for `inferReturnsDepthMapOfExpectedShape` may fail — in that case, run on a physical device:
@@ -946,7 +954,7 @@ struct MockWall: PlaneAnchorDescriptor {
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/RoomGeometryBuilderTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/RoomGeometryBuilderTests 2>&1 | tail -20
 ```
 
 Expected: compile failure with "cannot find 'RoomGeometryBuilder' in scope".
@@ -1102,7 +1110,7 @@ Follow Task 1 Step 4 pattern. IDs:
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/RoomGeometryBuilderTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/RoomGeometryBuilderTests 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **` with 4 tests passing.
@@ -1197,7 +1205,7 @@ struct PointCloudAccumulatorTests {
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/PointCloudAccumulatorTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/PointCloudAccumulatorTests 2>&1 | tail -20
 ```
 
 Expected: compile failure with "cannot find 'PointCloudAccumulator' in scope" and "cannot find 'Intrinsics' in scope".
@@ -1363,7 +1371,7 @@ Follow Task 1 Step 4 pattern. IDs:
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/PointCloudAccumulatorTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/PointCloudAccumulatorTests 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **` with 4 tests passing.
@@ -1488,7 +1496,7 @@ struct KeyframeSelectorTests {
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/KeyframeSelectorTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/KeyframeSelectorTests 2>&1 | tail -20
 ```
 
 Expected: compile failure with "cannot find 'KeyframeSelector' in scope".
@@ -1596,7 +1604,7 @@ Follow Task 1 Step 4 pattern. IDs:
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' -only-testing:decroom_no_lidarTests/KeyframeSelectorTests 2>&1 | tail -20
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:decroom_no_lidarTests/KeyframeSelectorTests 2>&1 | tail -20
 ```
 
 Expected: `** TEST SUCCEEDED **` with 4 tests passing.
@@ -1624,7 +1632,7 @@ in pose space (spatial diversity)."
 Run:
 ```bash
 cd /Users/jaejeon/Desktop/Decroom/decroom_no_lidar/decroom_no_lidar
-xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 15 Pro' 2>&1 | tail -40
+xcodebuild test -scheme decroom_no_lidar -destination 'platform=iOS Simulator,name=iPhone 17 Pro' 2>&1 | tail -40
 ```
 
 Expected: `** TEST SUCCEEDED **` with all tests from Tasks 1-7 passing plus the existing `decroom_no_lidarTests.example` test.

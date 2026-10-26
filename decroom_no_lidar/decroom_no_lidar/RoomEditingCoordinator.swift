@@ -197,21 +197,33 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
             let newY = drag.beginObjectY + deltaY
             model.moveY(id, to: Float(newY), gestureBegan: began)
         } else {
-            // Floor (XZ) drag — raycast finger to floor plane, snap, clamp.
+            // Floor (XZ) drag — raycast finger to floor plane and clamp to
+            // the room footprint (using the object's rotated AABB) so its
+            // farthest edge can at most sit flush with the inside of a wall.
+            // No auto wall-snap: the user places freely; clamp alone guards
+            // the boundary.
             let point = gr.location(in: scnView)
             guard let floor = SceneSelection.floorPoint(forScreen: point, in: scnView) else { return }
             let obj = model.roomPayload.objects.first(where: { $0.id == id })
-            let category = obj?.type ?? ""
-            let metadata = obj?.metadata
-            let snapped = SceneSelection.wallSnap(
-                position: floor, category: category,
-                walls: model.roomPayload.room.walls,
-                objectMetadata: metadata
-            )
             let clamped = SceneSelection.clampToFootprint(
-                snapped, walls: model.roomPayload.room.walls,
-                objectMetadata: metadata
+                floor, walls: model.roomPayload.room.walls,
+                objectMetadata: obj?.metadata,
+                rotationY: obj?.rotation_y ?? 0
             )
+            if gr.state == .ended || began {
+                let dimsStr: String
+                if let m = obj?.metadata {
+                    dimsStr = "(\(String(format: "%.2f", m.width)), \(String(format: "%.2f", m.length)))"
+                } else {
+                    dimsStr = "(nil)"
+                }
+                let rotDeg = (obj?.rotation_y ?? 0) * 180 / .pi
+                print(String(format: "[Decroom] DRAG %@ id=%@ state=%@ floor=(%.3f, %.3f) clamped=(%.3f, %.3f) walls=%d dims_WL=%@ rot=%.0f°",
+                             obj?.type ?? "?", id, gr.state == .ended ? "end" : "begin",
+                             floor.x, floor.y, clamped.x, clamped.y,
+                             model.roomPayload.room.walls.count,
+                             dimsStr, rotDeg))
+            }
             model.move(id, to: clamped, gestureBegan: began)
         }
     }
@@ -227,6 +239,22 @@ final class RoomEditingCoordinator: NSObject, UIGestureRecognizerDelegate {
 
         let began = (gr.state == .began)
         model.rotate(id, toRadians: Float(newRotation), gestureBegan: began)
+
+        // The rotated AABB can now extend past a wall that the old rotation
+        // didn't reach — re-clamp position with the new rotation so the
+        // geometry stays inside. Pass gestureBegan: false so the move
+        // doesn't overwrite the rotate-began undo snapshot.
+        if let obj = model.roomPayload.objects.first(where: { $0.id == id }) {
+            let xz = SIMD2<Float>(Float(obj.position.x), Float(obj.position.z))
+            let reclamped = SceneSelection.clampToFootprint(
+                xz, walls: model.roomPayload.room.walls,
+                objectMetadata: obj.metadata,
+                rotationY: newRotation
+            )
+            if reclamped != xz {
+                model.move(id, to: reclamped, gestureBegan: false)
+            }
+        }
 
         if gr.state == .ended || gr.state == .cancelled {
             gr.rotation = 0
