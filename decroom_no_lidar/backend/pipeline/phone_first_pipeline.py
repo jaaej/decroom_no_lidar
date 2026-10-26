@@ -79,6 +79,26 @@ class PhoneFirstPayload:
     yolo_objects: List[Dict[str, Any]] = field(default_factory=list)
 
 
+def _reject_non_finite(token: str) -> float:
+    raise ValueError(f"non-finite number {token} not allowed")
+
+
+def _finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):  # e.g. 1e999 overflows to inf
+        _reject_non_finite(token)
+    return value
+
+
+def _loads_finite(raw: bytes) -> Any:
+    """json.loads that rejects NaN / Infinity / overflowing literals."""
+    return json.loads(
+        raw.decode("utf-8"),
+        parse_constant=_reject_non_finite,
+        parse_float=_finite_float,
+    )
+
+
 def parse_payload(
     room_geometry: bytes,
     point_cloud_ply: bytes,
@@ -89,7 +109,7 @@ def parse_payload(
 ) -> PhoneFirstPayload:
     """Parse multipart parts. Raises PhoneFirstSchemaError on any malformity."""
     try:
-        geom = json.loads(room_geometry.decode("utf-8"))
+        geom = _loads_finite(room_geometry)
     except Exception as e:
         raise PhoneFirstSchemaError(f"room_geometry.json invalid: {e}")
 
@@ -108,21 +128,21 @@ def parse_payload(
         raise PhoneFirstSchemaError("point_cloud.ply missing or malformed header")
 
     try:
-        manifest = json.loads(keyframes_manifest.decode("utf-8"))
+        manifest = _loads_finite(keyframes_manifest)
     except Exception as e:
         raise PhoneFirstSchemaError(f"keyframes.json invalid: {e}")
     if "frames" not in manifest:
         raise PhoneFirstSchemaError("keyframes.json missing 'frames'")
 
     try:
-        log = json.loads(scan_log.decode("utf-8")) if scan_log else {}
+        log = _loads_finite(scan_log) if scan_log else {}
     except Exception as e:
         raise PhoneFirstSchemaError(f"scan_log.json invalid: {e}")
 
     yolo_list: List[Dict[str, Any]] = []
     if yolo_objects:
         try:
-            yolo_doc = json.loads(yolo_objects.decode("utf-8"))
+            yolo_doc = _loads_finite(yolo_objects)
         except Exception as e:
             raise PhoneFirstSchemaError(f"yolo_objects.json invalid: {e}")
         if not isinstance(yolo_doc, dict) or "objects" not in yolo_doc:

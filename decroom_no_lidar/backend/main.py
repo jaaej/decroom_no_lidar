@@ -23,7 +23,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pipeline.config import PipelineConfig
@@ -406,15 +406,24 @@ async def upload_phone_first(
     except _PayloadTooLarge as e:
         logger.warning("Phone-first upload too large: %s", e)
         return JSONResponse(status_code=413, content={"error": "payload_too_large"})
-    except Exception as e:
+    except Exception:
+        # Details stay in the server log; they can include local paths.
         logger.exception("Phone-first pipeline failed")
         return JSONResponse(
             status_code=500,
-            content={"error": "pipeline_failure", "detail": str(e)},
+            content={"error": "pipeline_failure", "detail": "see server log"},
         )
 
     _archive_debug_artifacts(room_id, result, None, run_started_at)
-    return JSONResponse(content=result)
+    try:
+        body = json.dumps(result, allow_nan=False)
+    except ValueError:
+        logger.error("Phone-first result for %s contains NaN/Infinity", room_id)
+        return JSONResponse(
+            status_code=500,
+            content={"error": "pipeline_failure", "detail": "see server log"},
+        )
+    return Response(content=body, media_type="application/json")
 
 
 @app.get("/health")

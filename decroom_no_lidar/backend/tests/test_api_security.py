@@ -177,3 +177,30 @@ def test_unauthenticated_upload_is_rejected_before_body_is_read():
                                "content-length": "10"})
     assert status == 401
     assert reads == []
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_non_finite_numbers_in_upload_are_400(client, literal):
+    geom = ('{"walls": [], "floor_height": 0.0, "ceiling_height": %s, '
+            '"manhattan_yaw": 0.0, "coordinate_system": "%s"}'
+            % (literal, EXPECTED_COORDINATE_SYSTEM)).encode()
+    r = client.post(UPLOAD, files=_files(geom=geom), headers=_auth_header())
+    assert r.status_code == 400
+    assert r.json()["error"] == "schema_error"
+
+
+def test_non_finite_result_is_handled_500(client, monkeypatch):
+    monkeypatch.setattr(pfp, "run_phone_first_pipeline",
+                        lambda payload, cfg: {"room": {"width_m": float("nan")}})
+    r = client.post(UPLOAD, files=_files(), headers=_auth_header())
+    assert r.status_code == 500
+    assert r.json()["error"] == "pipeline_failure"
+
+
+def test_pipeline_exception_text_is_not_returned(client, monkeypatch):
+    def boom(payload, cfg):
+        raise RuntimeError("/Users/someone/secret/path exploded")
+    monkeypatch.setattr(pfp, "run_phone_first_pipeline", boom)
+    r = client.post(UPLOAD, files=_files(), headers=_auth_header())
+    assert r.status_code == 500
+    assert "secret" not in r.text
