@@ -6,9 +6,15 @@
 	<string>Decroom needs camera access to scan your room using AR.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_decroom._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Decroom finds and uploads scans to your Decroom server on this Wi-Fi network.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>InstrumentSerif-Regular.ttf</string>

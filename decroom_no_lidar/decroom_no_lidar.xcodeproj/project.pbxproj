@@ -574,7 +574,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "decroom-no-lidar-Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to record your room video for 3D reconstruction.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio is captured with your room video.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -606,7 +605,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "decroom-no-lidar-Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to record your room video for 3D reconstruction.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio is captured with your room video.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
