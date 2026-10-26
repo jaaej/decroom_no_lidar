@@ -109,11 +109,41 @@ def _auth_ok(header: Optional[str]) -> bool:
 
 @app.middleware("http")
 async def _require_auth(request: Request, call_next):
-    # Runs before FastAPI parses the multipart body, so unauthenticated
-    # uploads are rejected without being spooled to disk.
-    if request.method == "POST" and not _auth_ok(request.headers.get(AUTH_HEADER)):
-        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    # Runs before FastAPI parses the multipart body, so unauthenticated or
+    # oversized uploads are rejected without being spooled to disk.
+    if request.method == "POST":
+        if not _auth_ok(request.headers.get(AUTH_HEADER)):
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+        try:
+            length = int(request.headers["content-length"])
+        except (KeyError, ValueError):
+            return JSONResponse(status_code=411, content={"error": "length_required"})
+        if length > MAX_REQUEST_BYTES:
+            return JSONResponse(status_code=413, content={"error": "payload_too_large"})
     return await call_next(request)
+
+
+# ── Upload size caps ────────────────────────────────────────────
+# A real scan is ~25 MB (66 keyframes x ~300 KB, PLY capped at 500K points
+# = 7.5 MB), so these leave plenty of headroom.
+MAX_REQUEST_BYTES = 500 * 1024 * 1024
+MAX_PLY_BYTES = 200 * 1024 * 1024
+MAX_KEYFRAME_BYTES = 10 * 1024 * 1024
+MAX_KEYFRAMES = 200
+MAX_JSON_BYTES = 20 * 1024 * 1024
+
+
+class _PayloadTooLarge(Exception):
+    pass
+
+
+async def _read_capped(upload: UploadFile, limit: int) -> bytes:
+    if upload.size is not None and upload.size > limit:
+        raise _PayloadTooLarge(upload.filename)
+    data = await upload.read(limit + 1)
+    if len(data) > limit:
+        raise _PayloadTooLarge(upload.filename)
+    return data
 
 # Singleton config
 cfg = PipelineConfig()
@@ -257,12 +287,14 @@ async def upload_phone_first(
             run_phone_first_pipeline,
         )
 
-        room_geom_bytes = await room_geometry.read()
-        ply_bytes = await point_cloud.read()
-        manifest_bytes = await keyframes_manifest.read()
-        keyframe_bytes = [await kf.read() for kf in keyframes]
-        log_bytes = await scan_log.read() if scan_log is not None else b""
-        yolo_bytes = await yolo_objects.read() if yolo_objects is not None else b""
+        if len(keyframes) > MAX_KEYFRAMES:
+            raise _PayloadTooLarge(f"{len(keyframes)} keyframes")
+        room_geom_bytes = await _read_capped(room_geometry, MAX_JSON_BYTES)
+        ply_bytes = await _read_capped(point_cloud, MAX_PLY_BYTES)
+        manifest_bytes = await _read_capped(keyframes_manifest, MAX_JSON_BYTES)
+        keyframe_bytes = [await _read_capped(kf, MAX_KEYFRAME_BYTES) for kf in keyframes]
+        log_bytes = await _read_capped(scan_log, MAX_JSON_BYTES) if scan_log is not None else b""
+        yolo_bytes = await _read_capped(yolo_objects, MAX_JSON_BYTES) if yolo_objects is not None else b""
 
         # Dump raw keyframe JPEGs for offline use (Marble spike, inspection).
         try:
@@ -302,6 +334,9 @@ async def upload_phone_first(
         result = await run_in_threadpool(
             run_phone_first_pipeline, payload, cfg
         )
+    except _PayloadTooLarge as e:
+        logger.warning("Phone-first upload too large: %s", e)
+        return JSONResponse(status_code=413, content={"error": "payload_too_large"})
     except Exception as e:
         logger.exception("Phone-first pipeline failed")
         return JSONResponse(

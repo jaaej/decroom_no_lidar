@@ -116,3 +116,21 @@ def test_health_proof_cannot_be_replayed_as_upload_auth(client):
 def test_health_rejects_oversized_nonce(client):
     r = client.get("/health", params={"nonce": "x" * 500})
     assert r.status_code == 422
+
+
+def test_too_many_keyframes_is_413(client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_KEYFRAMES", 2)
+    r = client.post(UPLOAD, files=_files(keyframe_count=3), headers=_auth_header())
+    assert r.status_code == 413
+
+
+def test_oversized_part_is_413(client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_PLY_BYTES", 16)
+    r = client.post(UPLOAD, files=_files(), headers=_auth_header())
+    assert r.status_code == 413
+
+
+def test_oversized_request_is_413_before_parsing(client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_REQUEST_BYTES", 100)
+    r = client.post(UPLOAD, files=_files(), headers=_auth_header())
+    assert r.status_code == 413
