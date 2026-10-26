@@ -18,6 +18,12 @@ export DECROOM_SPATIALLM_API_URL=http://localhost:8100/infer
 python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+## Backend auth + data (security fixes, 2026-10-27)
+- **Server key**: uploads need an HMAC signed with a shared key. Source order: `DECROOM_API_TOKEN` env → `~/.decroom/api_token` → generated on first start (0600) and printed once to stdout. Later starts print only its location + an 8-hex fingerprint (`cat ~/.decroom/api_token` to see it again). The app needs it in **Settings → Server key** (Keychain); Settings shows the same fingerprint. The key is never sent over the network and must never be logged or committed.
+- **Data dir**: keyframe dumps, run archives and debug files live in `~/.decroom/data` (override `DECROOM_DATA_DIR`), not `/tmp`: `keyframes/latest/`, `runs/latest/`, `decroom_b0_*`.
+- **SpatialLM server** binds `127.0.0.1:8100` (reach it via the SSH tunnel; `SPATIALLM_HOST=0.0.0.0` to override). Model/code revisions are pinned in `server.py` and `setup.sh`.
+- Upload caps: 500 MB request, 200 MB PLY, 10 MB/keyframe, 200 keyframes → 413.
+
 ## Critical Rules
 - ARKit `capturedImage` is ALWAYS landscape-right — apply `.oriented(.right)` and swap intrinsics for portrait
 - SceneKit `eulerAngles.y` is CW positive — negate backend `rotation_y` (CCW positive)
