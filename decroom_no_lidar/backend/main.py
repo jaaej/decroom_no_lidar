@@ -26,6 +26,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from pipeline.config import PipelineConfig
+from pipeline.data_dir import data_dir
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("decroom-backend")
@@ -168,7 +169,6 @@ _zeroconf = None
 _service_info = None
 
 PORT = 8000
-RUN_ARCHIVE_ROOT = Path("/tmp/decroom_runs")
 
 _dns_sd_proc: subprocess.Popen | None = None
 
@@ -200,15 +200,16 @@ def _archive_debug_artifacts(
     metadata_raw: Optional[dict],
     run_started_at: float,
 ) -> None:
-    """Copy /tmp decroom diagnostics to a timestamped run folder."""
+    """Copy decroom diagnostics to a timestamped run folder."""
     try:
+        run_archive_root = data_dir() / "runs"
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = RUN_ARCHIVE_ROOT / f"{ts}_{room_id}"
+        run_dir = run_archive_root / f"{ts}_{room_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
 
         src_globs = [
-            "/tmp/decroom_*.json",
-            "/tmp/decroom_*.png",
+            str(data_dir() / "decroom_*.json"),
+            str(data_dir() / "decroom_*.png"),
         ]
         copied = 0
         copied_names = []
@@ -236,7 +237,7 @@ def _archive_debug_artifacts(
         with open(run_dir / "response_payload.json", "w") as f:
             json.dump(payload, f, indent=2)
 
-        latest = RUN_ARCHIVE_ROOT / "latest"
+        latest = run_archive_root / "latest"
         try:
             if latest.is_symlink() or latest.exists():
                 latest.unlink()
@@ -298,7 +299,7 @@ async def upload_phone_first(
 
         # Dump raw keyframe JPEGs for offline use (Marble spike, inspection).
         try:
-            kf_root = Path("/tmp/decroom_keyframes")
+            kf_root = data_dir() / "keyframes"
             kf_dir = kf_root / room_id
             kf_dir.mkdir(parents=True, exist_ok=True)
             for i, kb in enumerate(keyframe_bytes):

@@ -19,7 +19,6 @@ import math
 import os
 import struct
 import sys
-import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -31,6 +30,7 @@ try:
 except ImportError:
     np = None  # type: ignore
 
+from .data_dir import data_dir
 from .spatiallm_layout import (
     SPATIALLM_TO_PRD,
     arkit_to_spatiallm_coords,
@@ -504,23 +504,26 @@ def _run_spatiallm_on_phone_ply(
     confidence = float(getattr(cfg, "spatiallm_confidence", 0.85))
     parse_spatiallm_output._confidence = confidence
 
-    ply_path = Path(tempfile.gettempdir()) / "decroom_phone_first_spatiallm.ply"
+    # Unique per request so concurrent uploads can't overwrite each other.
+    ply_path = data_dir() / f"spatiallm_input_{uuid.uuid4().hex}.ply"
     write_colored_ply(ply_path, slm_points, colors)
 
-    raw_text = run_spatiallm_inference(ply_path, cfg)
+    try:
+        raw_text = run_spatiallm_inference(ply_path, cfg)
+    finally:
+        ply_path.unlink(missing_ok=True)
     if raw_text is None:
         raise RuntimeError("SpatialLM: inference returned no output")
 
     # B0 PROBES (re-enabled for follow-up debugging) — capture raw SLM
-    # output and parsed layout to /tmp so we can see why bboxes aren't
-    # showing up on real-room scans. Remove once Task 18 QA passes.
-    import pathlib as _p
-    _p.Path("/tmp/decroom_b0_raw_slm.txt").write_text(raw_text or "")
+    # output and parsed layout to the data dir so we can see why bboxes
+    # aren't showing up on real-room scans. Remove once Task 18 QA passes.
+    (data_dir() / "decroom_b0_raw_slm.txt").write_text(raw_text or "")
 
     layout, objects = parse_spatiallm_output(raw_text, coord_offset)
 
     import json as _j
-    _p.Path("/tmp/decroom_b0_parsed_slm.json").write_text(
+    (data_dir() / "decroom_b0_parsed_slm.json").write_text(
         _j.dumps({"layout": layout, "objects": objects}, default=str, indent=2)
     )
 

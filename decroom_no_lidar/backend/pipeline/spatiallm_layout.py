@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import re
 import struct
-import tempfile
 from math import atan2, cos, pi, sin, sqrt
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +29,7 @@ try:
 except ImportError:
     np = None
 
+from .data_dir import data_dir
 from .metadata import ShotMetadata
 
 
@@ -768,12 +768,12 @@ def run_spatiallm_pipeline(
     slm_points, coord_offset = arkit_to_spatiallm_coords(points)
 
     # Step 3: Write PLY
-    ply_path = Path(tempfile.gettempdir()) / "decroom_spatiallm_input.ply"
+    ply_path = data_dir() / "decroom_spatiallm_input.ply"
     write_colored_ply(ply_path, slm_points, colors)
 
     # Also save a debug copy of the ARKit-frame point cloud
     if bool(getattr(cfg, "debug_output", False)):
-        debug_ply = Path(tempfile.gettempdir()) / "decroom_pointcloud.ply"
+        debug_ply = data_dir() / "decroom_pointcloud.ply"
         write_colored_ply(debug_ply, points, colors)
 
     # Step 4: Run inference
@@ -783,7 +783,7 @@ def run_spatiallm_pipeline(
 
     # Save raw output for debugging
     if bool(getattr(cfg, "debug_output", False)):
-        debug_txt = Path(tempfile.gettempdir()) / "decroom_spatiallm_output.txt"
+        debug_txt = data_dir() / "decroom_spatiallm_output.txt"
         debug_txt.write_text(raw_text)
 
     # Step 5: Parse output

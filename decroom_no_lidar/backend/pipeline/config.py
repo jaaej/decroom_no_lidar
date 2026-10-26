@@ -4,6 +4,8 @@ from pathlib import Path
 import shutil
 from typing import Dict, List
 
+from .data_dir import data_dir
+
 _config_logger = logging.getLogger("decroom-backend.config")
 
 
@@ -236,7 +238,7 @@ class PipelineConfig:
     sfm_camera_model: str = "SIMPLE_PINHOLE"
     sfm_required_registration_ratio: float = 0.25
     sfm_required_aligned_poses: int = 4
-    sfm_workspace_root: str = "/tmp/decroom_sfm"
+    sfm_workspace_root: str = field(default_factory=lambda: str(data_dir() / "sfm"))
     sfm_keep_workspace: bool = False
     enable_pycolmap_backend: bool = True
     sfm_prefer_colmap_cli: bool = True
