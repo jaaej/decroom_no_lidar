@@ -322,9 +322,11 @@ enum RoomSceneBuilder {
 
         let centerX: Float
         let centerZ: Float
-        if !env.walls.isEmpty {
-            let allX = env.walls.flatMap { [Float($0.start[0]), Float($0.end[0])] }
-            let allZ = env.walls.flatMap { [Float($0.start[1]), Float($0.end[1])] }
+        // Server data: skip malformed walls rather than crash on [0]/[1].
+        let validWalls = env.walls.filter { $0.start.count >= 2 && $0.end.count >= 2 }
+        if !validWalls.isEmpty {
+            let allX = validWalls.flatMap { [Float($0.start[0]), Float($0.end[0])] }
+            let allZ = validWalls.flatMap { [Float($0.start[1]), Float($0.end[1])] }
             centerX = ((allX.min() ?? 0) + (allX.max() ?? 0)) / 2
             centerZ = ((allZ.min() ?? 0) + (allZ.max() ?? 0)) / 2
         } else {
