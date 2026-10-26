@@ -18,6 +18,8 @@ enum ScanError: Error, Equatable {
     case insufficientCoverage(binsFilled: Int, binsRequired: Int)
     case payloadBuildFailed(detail: String)
     case uploadNoServer
+    case serverKeyMissing
+    case serverKeyMismatch
     case uploadTimeout
     case backendSchemaError(scanID: String, detail: String)
     case backendServerError(status: Int, detail: String)
@@ -42,6 +44,10 @@ enum ScanError: Error, Equatable {
             return "Couldn't save scan data. Check phone storage and try again."
         case .uploadNoServer:
             return "Can't reach the Decroom server. Check WiFi and tap Retry."
+        case .serverKeyMissing:
+            return "Add the server key in Settings → Server key. The backend prints it the first time it starts (or run cat ~/.decroom/api_token on the server)."
+        case .serverKeyMismatch:
+            return "Found a Decroom server, but it doesn't match your server key. Check Settings → Server key."
         case .uploadTimeout:
             return "Server took too long. Try again in a moment."
         case .backendSchemaError(let id, _):
@@ -64,6 +70,8 @@ enum ScanError: Error, Equatable {
         case .noWallsDetected, .insufficientCoverage:
             return true  // "Resume scan" rather than "Retry upload"
         case .unsupportedDevice,
+             .serverKeyMissing,
+             .serverKeyMismatch,
              .depthModelLoadFailed,
              .arKitSessionFailed,
              .backendSchemaError,
@@ -89,6 +97,10 @@ enum ScanError: Error, Equatable {
             return "yaw bins filled=\(filled), required=\(req)"
         case .uploadNoServer:
             return "No reachable backend among candidate URLs"
+        case .serverKeyMissing:
+            return "No server key in Keychain"
+        case .serverKeyMismatch:
+            return "Server failed the /health key proof or returned 401"
         case .uploadTimeout:
             return "URLSession timed out"
         case .backendSchemaError(_, let d):

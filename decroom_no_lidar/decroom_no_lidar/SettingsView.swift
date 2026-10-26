@@ -3,7 +3,8 @@
 //  decroom_no_lidar
 //
 //  Settings screen ported from screens-settings.jsx. Toggle/select state
-//  persists via @AppStorage; nothing wires to backend.
+//  persists via @AppStorage. The server key (Keychain) is the only row
+//  that wires to the backend.
 //
 
 import SwiftUI
@@ -39,6 +40,8 @@ struct SettingsView: View {
                         privacyGroup
                             .padding(.bottom, 20)
                         captureGroup
+                            .padding(.bottom, 20)
+                        serverGroup
                             .padding(.bottom, 20)
                         supportGroup
                             .padding(.bottom, 20)
@@ -162,6 +165,13 @@ struct SettingsView: View {
                                 ("high", "High · best detail"),
                                 ("pro", "Pro · maximum precision")],
                       value: $qualityRaw)
+        }
+    }
+
+    private var serverGroup: some View {
+        SettingsGroup(label: "SERVER",
+                      hint: "Paste the key the Decroom backend prints when it first starts (or run cat ~/.decroom/api_token on the server). Kept in this phone's Keychain.") {
+            ServerKeyRow()
         }
     }
 
@@ -341,6 +351,52 @@ private struct SelectRow: View {
                 }
             }
         }
+    }
+}
+
+private struct ServerKeyRow: View {
+    @State private var draft: String = ""
+    @State private var fingerprint: String? = ServerKey.load().map(ServerKey.fingerprint)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Server key")
+                    .font(DR.sans(13, weight: .medium))
+                    .foregroundStyle(DR.ink)
+                Text(fingerprint.map { "Saved · fingerprint \($0)" } ?? "Not set — uploads will fail")
+                    .font(DR.sans(11))
+                    .foregroundStyle(fingerprint == nil ? DR.redText : DR.ink3)
+            }
+            HStack(spacing: 8) {
+                SecureField(fingerprint == nil ? "Paste key" : "Paste new key", text: $draft)
+                    .font(DR.mono(12))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(DR.cream2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(DR.line, lineWidth: 1)
+                    )
+                Button {
+                    if ServerKey.save(draft) {
+                        draft = ""
+                        fingerprint = ServerKey.load().map(ServerKey.fingerprint)
+                    }
+                } label: {
+                    Text("Save")
+                        .font(DR.sans(12, weight: .medium))
+                        .foregroundStyle(DR.ink2)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .overlay(Capsule().stroke(DR.line, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 }
 

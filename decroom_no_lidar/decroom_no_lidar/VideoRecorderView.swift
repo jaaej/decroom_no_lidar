@@ -463,6 +463,8 @@ struct VideoRecorderView: View {
             .uploadTimeout,
             .backendServerError(status: 0, detail: ""),
             .noFurnitureDetected,
+            .serverKeyMissing,
+            .serverKeyMismatch,
         ]
         return table.first(where: { $0.message == msg })
             ?? .backendServerError(status: 0, detail: msg)

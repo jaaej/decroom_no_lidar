@@ -14,15 +14,21 @@ import Network
 final class ServerDiscovery: ObservableObject {
     static let shared = ServerDiscovery()
 
-    /// The discovered upload URL, e.g. "http://192.168.1.42:8000/api/upload".
-    /// Nil until a server is found on the network.
-    @Published private(set) var uploadURL: String?
+    /// Upload URLs of every advertised server, e.g.
+    /// "http://192.168.1.42:8000/api/upload". Anything on the network can
+    /// advertise _decroom._tcp, so UploadService verifies each one holds
+    /// the server key before using it.
+    @Published private(set) var uploadURLs: [String] = []
+
+    /// First discovered upload URL. Nil until a server is found.
+    var uploadURL: String? { uploadURLs.first }
 
     /// Whether actively searching.
     @Published private(set) var isSearching = false
 
     private var browser: NWBrowser?
-    private var connection: NWConnection?
+    private var connections: [NWEndpoint: NWConnection] = [:]
+    private var resolved: [NWEndpoint: String] = [:]
 
     private init() {
         startBrowsing()
@@ -33,7 +39,9 @@ final class ServerDiscovery: ObservableObject {
         browser?.cancel()
 
         let params = NWParameters()
-        params.includePeerToPeer = true
+        // The backend is a Mac on the same Wi-Fi; peer-to-peer (AWDL) would
+        // only widen who can answer as "the server".
+        params.includePeerToPeer = false
         let descriptor = NWBrowser.Descriptor.bonjour(type: "_decroom._tcp", domain: nil)
         let newBrowser = NWBrowser(for: descriptor, using: params)
 
@@ -62,17 +70,26 @@ final class ServerDiscovery: ObservableObject {
     }
 
     private func handleResults(_ results: Set<NWBrowser.Result>) {
-        // Pick the first result
-        guard let result = results.first else {
-            uploadURL = nil
-            return
+        let endpoints = Set(results.map(\.endpoint))
+        for (endpoint, conn) in connections where !endpoints.contains(endpoint) {
+            conn.cancel()
+            connections[endpoint] = nil
         }
+        resolved = resolved.filter { endpoints.contains($0.key) }
+        publish()
+        for endpoint in endpoints where resolved[endpoint] == nil && connections[endpoint] == nil {
+            resolve(endpoint)
+        }
+    }
 
-        // Resolve the endpoint to get IP + port
-        let conn = NWConnection(to: result.endpoint, using: .tcp)
+    /// Resolve a Bonjour endpoint to IP + port via a throwaway TCP connection.
+    private func resolve(_ endpoint: NWEndpoint) {
+        let conn = NWConnection(to: endpoint, using: .tcp)
         conn.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
-                if case .ready = state {
+                guard let self else { return }
+                switch state {
+                case .ready:
                     if let innerEndpoint = conn.currentPath?.remoteEndpoint,
                        case let .hostPort(host, port) = innerEndpoint {
                         let ip: String
@@ -86,19 +103,35 @@ final class ServerDiscovery: ObservableObject {
                         @unknown default:
                             ip = "\(host)"
                         }
-                        self?.uploadURL = "http://\(ip):\(port)/api/upload"
-                        print("[ServerDiscovery] Found backend at \(self?.uploadURL ?? "?")")
+                        let url = "http://\(ip):\(port)/api/upload"
+                        self.resolved[endpoint] = url
+                        self.publish()
+                        print("[ServerDiscovery] Found backend at \(url)")
                     }
                     conn.cancel()
+                    self.connections[endpoint] = nil
+                case .failed, .cancelled:
+                    self.connections[endpoint] = nil
+                default:
+                    break
                 }
             }
         }
+        connections[endpoint] = conn
         conn.start(queue: .main)
-        connection = conn
+    }
+
+    private func publish() {
+        let urls = resolved.values.sorted()
+        if urls != uploadURLs {
+            uploadURLs = urls
+        }
     }
 
     deinit {
         browser?.cancel()
-        connection?.cancel()
+        for conn in connections.values {
+            conn.cancel()
+        }
     }
 }
