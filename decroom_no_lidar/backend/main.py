@@ -21,9 +21,10 @@ import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Query, Request
+from fastapi import FastAPI, UploadFile, File, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pipeline.config import PipelineConfig
 from pipeline.data_dir import data_dir
@@ -47,15 +48,18 @@ AUTH_MAX_SKEW_S = 300
 NONCE_MAX_LEN = 128
 
 
-def _load_api_token() -> str:
-    """DECROOM_API_TOKEN env, else ~/.decroom/api_token, else generate one."""
+def _load_api_token() -> tuple[str, str, bool]:
+    """DECROOM_API_TOKEN env, else ~/.decroom/api_token, else generate one.
+
+    Returns (token, where it came from, whether it was just generated).
+    """
     env_token = os.getenv("DECROOM_API_TOKEN", "").strip()
     if env_token:
-        return env_token
+        return env_token, "the DECROOM_API_TOKEN env var", False
     try:
         file_token = API_TOKEN_FILE.read_text().strip()
         if file_token:
-            return file_token
+            return file_token, str(API_TOKEN_FILE), False
     except FileNotFoundError:
         pass
     API_TOKEN_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -64,11 +68,15 @@ def _load_api_token() -> str:
     fd = os.open(API_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(token + "\n")
-    logger.info("Generated new server key at %s", API_TOKEN_FILE)
-    return token
+    return token, str(API_TOKEN_FILE), True
 
 
-API_TOKEN = _load_api_token()
+API_TOKEN, API_TOKEN_SOURCE, API_TOKEN_GENERATED = _load_api_token()
+
+
+def _api_token_fingerprint() -> str:
+    """First 8 hex of sha256(key) — safe to show; the app shows the same."""
+    return hashlib.sha256(API_TOKEN.encode()).hexdigest()[:8]
 
 _seen_nonces: dict[str, float] = {}
 _seen_nonces_lock = threading.Lock()
@@ -108,20 +116,68 @@ def _auth_ok(header: Optional[str]) -> bool:
     return True
 
 
-@app.middleware("http")
-async def _require_auth(request: Request, call_next):
-    # Runs before FastAPI parses the multipart body, so unauthenticated or
-    # oversized uploads are rejected without being spooled to disk.
-    if request.method == "POST":
-        if not _auth_ok(request.headers.get(AUTH_HEADER)):
-            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+class _BodyTooLarge(StarletteHTTPException):
+    # An HTTPException so FastAPI's body parser re-raises it as a 413
+    # instead of wrapping it in a generic 400.
+    def __init__(self) -> None:
+        super().__init__(status_code=413, detail="payload_too_large")
+
+
+class _UploadGuard:
+    """Pure ASGI middleware: auth + body-size cap on every POST, enforced
+    before anything reads the body (FastAPI parses multipart forms before
+    the endpoint runs, so an endpoint-level check would be too late)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope["headers"]}
+        if not _auth_ok(headers.get(AUTH_HEADER.lower())):
+            await JSONResponse(status_code=401, content={"error": "unauthorized"})(scope, receive, send)
+            return
+        declared = headers.get("content-length")
+        if declared is not None:
+            if not declared.isdigit():
+                await JSONResponse(status_code=400, content={"error": "bad_content_length"})(scope, receive, send)
+                return
+            if int(declared) > MAX_REQUEST_BYTES:
+                await JSONResponse(status_code=413, content={"error": "payload_too_large"})(scope, receive, send)
+                return
+
+        # Content-Length can be absent (chunked) or wrong, so also count the
+        # bytes actually received.
+        received = 0
+
+        async def capped_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_REQUEST_BYTES:
+                    raise _BodyTooLarge()
+            return message
+
+        started = False
+
+        async def tracking_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
         try:
-            length = int(request.headers["content-length"])
-        except (KeyError, ValueError):
-            return JSONResponse(status_code=411, content={"error": "length_required"})
-        if length > MAX_REQUEST_BYTES:
-            return JSONResponse(status_code=413, content={"error": "payload_too_large"})
-    return await call_next(request)
+            await self.app(scope, capped_receive, tracking_send)
+        except _BodyTooLarge:
+            if not started:
+                await JSONResponse(status_code=413, content={"error": "payload_too_large"})(scope, receive, send)
+
+
+app.add_middleware(_UploadGuard)
 
 
 # ── Upload size caps ────────────────────────────────────────────
@@ -260,9 +316,21 @@ def _archive_debug_artifacts(
 async def on_startup():
     _register_bonjour()
     atexit.register(_unregister_bonjour)
-    logger.info(
-        "Server key (paste into the app: Settings > Server key): %s", API_TOKEN
-    )
+    # The key goes to stdout only, never through `logger` (logs persist).
+    if API_TOKEN_GENERATED:
+        print(
+            f"\nNew Decroom server key (saved to {API_TOKEN_SOURCE}):\n\n"
+            f"    {API_TOKEN}\n\n"
+            "Paste it into the app: Settings > Server key.\n",
+            flush=True,
+        )
+    else:
+        print(
+            f"Decroom server key loaded from {API_TOKEN_SOURCE} "
+            f"(fingerprint {_api_token_fingerprint()}). "
+            f"To see it again: cat {API_TOKEN_FILE}",
+            flush=True,
+        )
 
 
 @app.post("/api/upload/phone-first")

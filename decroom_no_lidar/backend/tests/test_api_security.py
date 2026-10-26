@@ -134,3 +134,46 @@ def test_oversized_request_is_413_before_parsing(client, monkeypatch):
     monkeypatch.setattr(main, "MAX_REQUEST_BYTES", 100)
     r = client.post(UPLOAD, files=_files(), headers=_auth_header())
     assert r.status_code == 413
+
+
+def test_chunked_body_over_cap_is_413(client, monkeypatch):
+    # A generator body is sent chunked (no Content-Length), so only the
+    # received-bytes counter can catch it.
+    monkeypatch.setattr(main, "MAX_REQUEST_BYTES", 1000)
+    body = (b"x" * 400 for _ in range(5))
+    r = client.post(UPLOAD, content=body, headers={
+        **_auth_header(), "content-type": "multipart/form-data; boundary=abc"})
+    assert r.status_code == 413
+
+
+def test_bad_content_length_is_400(client):
+    r = client.post(UPLOAD, content=b"{}", headers={
+        **_auth_header(), "content-length": "-5"})
+    assert r.status_code == 400
+
+
+def _run_asgi(headers):
+    """Drive main.app directly so we can see whether the body is ever read."""
+    import asyncio
+    reads, sent = [], []
+
+    async def receive():
+        reads.append(1)
+        return {"type": "http.request", "body": b"x" * 10, "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+             "method": "POST", "scheme": "http", "path": UPLOAD, "raw_path": UPLOAD.encode(),
+             "query_string": b"", "root_path": "", "server": ("test", 80), "client": ("1.2.3.4", 1),
+             "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]}
+    asyncio.run(main.app(scope, receive, send))
+    return reads, sent[0]["status"]
+
+
+def test_unauthenticated_upload_is_rejected_before_body_is_read():
+    reads, status = _run_asgi({"content-type": "multipart/form-data; boundary=abc",
+                               "content-length": "10"})
+    assert status == 401
+    assert reads == []
