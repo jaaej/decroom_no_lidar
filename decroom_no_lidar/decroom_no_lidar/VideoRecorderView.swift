@@ -78,7 +78,9 @@ struct VideoRecorderView: View {
             GuidedARViewContainer(recorder: recorder)
                 .ignoresSafeArea()
 
-            // LAYER 1.5: Debug recorder toggle — small, unobtrusive, top-trailing
+            // LAYER 1.5: Debug recorder toggle — small, unobtrusive, top-trailing.
+            // Debug builds only: it writes raw video + poses to Documents.
+            #if DEBUG
             VStack {
                 HStack {
                     Spacer()
@@ -93,6 +95,7 @@ struct VideoRecorderView: View {
             }
             .padding(.top, 54)
             .padding(.trailing, 12)
+            #endif
 
             // LAYER 2: UI controls
             VStack(spacing: 0) {
@@ -460,11 +463,11 @@ struct VideoRecorderView: View {
             .insufficientCoverage(binsFilled: 0, binsRequired: 12),
             .payloadBuildFailed(detail: ""),
             .uploadNoServer,
+            .serverKeyMissing,
+            .serverKeyMismatch,
             .uploadTimeout,
             .backendServerError(status: 0, detail: ""),
             .noFurnitureDetected,
-            .serverKeyMissing,
-            .serverKeyMismatch,
         ]
         return table.first(where: { $0.message == msg })
             ?? .backendServerError(status: 0, detail: msg)
