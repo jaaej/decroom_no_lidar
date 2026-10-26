@@ -40,7 +40,7 @@ pip install --quiet torch==2.4.1 torchvision --index-url https://download.pytorc
 # 4. Core deps + pinned transformers/tokenizers (5.x breaks SpatialLM)
 echo ">>> Installing core deps..."
 pip install --quiet transformers==4.46.1 tokenizers==0.20.3 \
-    open3d>=0.18.0 scipy scikit-learn numpy einops safetensors timm addict
+    "open3d>=0.18.0" scipy scikit-learn numpy einops safetensors timm addict
 pip install --quiet fastapi uvicorn python-multipart requests
 pip install --quiet wheel setuptools --upgrade
 
@@ -65,7 +65,8 @@ pip install --quiet flash-attn --no-build-isolation 2>/dev/null \
 # restore.
 echo ">>> Installing SpatialLM package (with pip downgrade workaround)..."
 pip install --quiet 'pip<24'
-pip install --quiet --no-deps git+https://github.com/manycore-research/SpatialLM.git
+# Pinned commit (matches the code_template.txt download below).
+pip install --quiet --no-deps git+https://github.com/manycore-research/SpatialLM.git@8913c44d84a450c53e9340b13317f8cf7144a738
 pip install --quiet --upgrade pip
 
 # 8. Pre-cache model weights via huggingface_hub
@@ -75,11 +76,11 @@ pip install --quiet --upgrade pip
 # isn't auto-registered, so AutoConfig fails with KeyError. snapshot_download
 # just pulls all repo files into the HF cache, which is what we actually want.
 echo ">>> Downloading model weights to $HF (this may take a few minutes)..."
-python3 -c "from huggingface_hub import snapshot_download; snapshot_download('manycore-research/SpatialLM1.1-Qwen-0.5B'); print('Model cached.')"
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download('manycore-research/SpatialLM1.1-Qwen-0.5B', revision='b3ae9ad7a8689bc130a242c7f922a8cc290c1b59'); print('Model cached.')"
 
 # Plan 3c: pre-cache Grounding DINO so server.py startup doesn't block on download.
 echo ">>> Downloading Grounding DINO weights..."
-python3 -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny'); print('Grounding DINO cached.')"
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny', revision='a2bb814dd30d776dcf7e30523b00659f4f141c71'); print('Grounding DINO cached.')"
 
 # 9. Copy server.py + code_template.txt into place
 echo ">>> Setting up server..."
@@ -100,7 +101,7 @@ fi
 # Without it the model degenerates to single-token loops (Wall(11,11,11,...)).
 echo ">>> Downloading SpatialLM code template..."
 curl -fsSL -o "$SERVER_DIR/code_template.txt" \
-    https://raw.githubusercontent.com/manycore-research/SpatialLM/main/code_template.txt \
+    https://raw.githubusercontent.com/manycore-research/SpatialLM/8913c44d84a450c53e9340b13317f8cf7144a738/code_template.txt \
     && echo "    code_template.txt downloaded ($(wc -c < "$SERVER_DIR/code_template.txt") bytes)" \
     || echo "WARNING: code_template.txt download failed — server will refuse to start"
 

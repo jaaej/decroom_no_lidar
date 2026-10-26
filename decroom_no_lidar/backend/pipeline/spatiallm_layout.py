@@ -455,14 +455,17 @@ def _inference_local(ply_path: Path, cfg: Any) -> Optional[str]:
 
     model_id = str(getattr(cfg, "spatiallm_model_id",
                             "manycore-research/SpatialLM1.1-Qwen-0.5B"))
+    revision = str(getattr(cfg, "spatiallm_model_revision",
+                            "b3ae9ad7a8689bc130a242c7f922a8cc290c1b59"))
 
     try:
         # Lazy load — cache for reuse across calls
         if not hasattr(_inference_local, "_model"):
             logger.info("SpatialLM local: loading model %s", model_id)
-            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
             model = AutoModelForCausalLM.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, trust_remote_code=True
+                model_id, revision=revision, torch_dtype=torch.bfloat16,
+                trust_remote_code=True,
             )
             model.to("cuda")
             model.eval()

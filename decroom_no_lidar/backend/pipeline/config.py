@@ -300,6 +300,8 @@ class PipelineConfig:
     spatiallm_api_url: str = "http://localhost:8100/infer"
     spatiallm_timeout_s: float = 120.0
     spatiallm_model_id: str = "manycore-research/SpatialLM1.1-Qwen-0.5B"
+    # Pinned commit — the model loads with trust_remote_code.
+    spatiallm_model_revision: str = "b3ae9ad7a8689bc130a242c7f922a8cc290c1b59"
     spatiallm_max_keyframes: int = 30
     spatiallm_pixel_stride: int = 4
     spatiallm_max_points: int = 500_000
