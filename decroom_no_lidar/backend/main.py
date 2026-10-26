@@ -7,17 +7,21 @@ from __future__ import annotations
 import atexit
 import datetime as dt
 import glob
+import hashlib
+import hmac
 import json
 import logging
 import os
+import secrets
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
@@ -27,6 +31,89 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("decroom-backend")
 
 app = FastAPI(title="Decroom Backend", version="0.1.0")
+
+# ── Shared-key auth ─────────────────────────────────────────────
+# The phone and this server share a secret key (the "server key" the user
+# pastes into the app's Settings). The key itself never goes over the wire:
+#   - uploads carry X-Decroom-Auth: "<unix_ts>:<nonce>:<hmac>" where
+#     hmac = HMAC-SHA256(key, "decroom-upload:<ts>:<nonce>"), single-use;
+#   - GET /health?nonce=N returns proof = HMAC-SHA256(key, "decroom-health:N")
+#     so the app can check a discovered server actually holds the key.
+# The two message prefixes differ so /health can't be used to mint upload auth.
+API_TOKEN_FILE = Path.home() / ".decroom" / "api_token"
+AUTH_HEADER = "X-Decroom-Auth"
+AUTH_MAX_SKEW_S = 300
+NONCE_MAX_LEN = 128
+
+
+def _load_api_token() -> str:
+    """DECROOM_API_TOKEN env, else ~/.decroom/api_token, else generate one."""
+    env_token = os.getenv("DECROOM_API_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    try:
+        file_token = API_TOKEN_FILE.read_text().strip()
+        if file_token:
+            return file_token
+    except FileNotFoundError:
+        pass
+    API_TOKEN_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(API_TOKEN_FILE.parent, 0o700)
+    token = secrets.token_urlsafe(32)
+    fd = os.open(API_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token + "\n")
+    logger.info("Generated new server key at %s", API_TOKEN_FILE)
+    return token
+
+
+API_TOKEN = _load_api_token()
+
+_seen_nonces: dict[str, float] = {}
+_seen_nonces_lock = threading.Lock()
+
+
+def _hmac_hex(message: str) -> str:
+    return hmac.new(API_TOKEN.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+def _auth_ok(header: Optional[str]) -> bool:
+    """Validate a single-use X-Decroom-Auth header."""
+    if not header:
+        return False
+    parts = header.split(":")
+    if len(parts) != 3:
+        return False
+    ts_str, nonce, sig = parts
+    try:
+        ts = int(ts_str)
+    except ValueError:
+        return False
+    now = time.time()
+    if abs(now - ts) > AUTH_MAX_SKEW_S:
+        return False
+    if not (8 <= len(nonce) <= NONCE_MAX_LEN):
+        return False
+    expected = _hmac_hex(f"decroom-upload:{ts_str}:{nonce}")
+    if not hmac.compare_digest(expected, sig.lower()):
+        return False
+    with _seen_nonces_lock:
+        for n, seen_at in list(_seen_nonces.items()):
+            if now - seen_at > 2 * AUTH_MAX_SKEW_S:
+                del _seen_nonces[n]
+        if nonce in _seen_nonces:
+            return False
+        _seen_nonces[nonce] = now
+    return True
+
+
+@app.middleware("http")
+async def _require_auth(request: Request, call_next):
+    # Runs before FastAPI parses the multipart body, so unauthenticated
+    # uploads are rejected without being spooled to disk.
+    if request.method == "POST" and not _auth_ok(request.headers.get(AUTH_HEADER)):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await call_next(request)
 
 # Singleton config
 cfg = PipelineConfig()
@@ -142,6 +229,9 @@ def _archive_debug_artifacts(
 async def on_startup():
     _register_bonjour()
     atexit.register(_unregister_bonjour)
+    logger.info(
+        "Server key (paste into the app: Settings > Server key): %s", API_TOKEN
+    )
 
 
 @app.post("/api/upload/phone-first")
@@ -224,8 +314,10 @@ async def upload_phone_first(
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health(nonce: Optional[str] = Query(None, max_length=NONCE_MAX_LEN)):
+    if nonce is None:
+        return {"status": "ok"}
+    return {"status": "ok", "proof": _hmac_hex(f"decroom-health:{nonce}")}
 
 
 if __name__ == "__main__":
